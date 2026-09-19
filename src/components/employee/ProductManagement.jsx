@@ -21,8 +21,21 @@ const ProductManagement = () => {
     is_new_arrival: false,
     image_url: ''
   });
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('all');
 
-  const categories = ['Engine', 'Brake', 'Electrical', 'Chain', 'Tire', 'Clutch', 'Body', 'Other'];
+  const categories = [
+    'Rear Shock',
+    'Radiator',
+    'Radiator Cover',
+    'Mags',
+    'Tires',
+    'Disc Brake',
+    'Caliper',
+    'Brake System',
+    'Swing Arm',
+    'Pipe'
+  ];
 
   useEffect(() => {
     fetchProducts();
@@ -176,6 +189,21 @@ const ProductManagement = () => {
     if (!error) fetchProducts();
   };
 
+  const filteredProducts = products.filter((product) => {
+    const normalizedSearch = searchTerm.trim().toLowerCase();
+
+    const matchesSearch =
+      !normalizedSearch ||
+      product.name?.toLowerCase().includes(normalizedSearch) ||
+      product.description?.toLowerCase().includes(normalizedSearch);
+
+    const matchesCategory =
+      selectedCategory === 'all' ||
+      product.category === selectedCategory;
+
+    return matchesSearch && matchesCategory;
+  });
+
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
@@ -189,6 +217,61 @@ const ProductManagement = () => {
         >
           + Add Product
         </button>
+      </div>
+
+      {/* Product Search + Category Filter */}
+      <div className="mb-5 rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-3 md:flex-row">
+          <div className="relative flex-1">
+            <span className="pointer-events-none absolute inset-y-0 left-4 flex items-center text-slate-400">
+              ⌕
+            </span>
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search product name or description..."
+              className="w-full rounded-2xl border border-slate-300 bg-slate-50 py-3 pl-11 pr-4 text-sm outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
+            />
+          </div>
+
+          <select
+            value={selectedCategory}
+            onChange={(e) => setSelectedCategory(e.target.value)}
+            className="rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100 md:w-64"
+          >
+            <option value="all">All Categories</option>
+            {categories.map((category) => (
+              <option key={category} value={category}>
+                {category}
+              </option>
+            ))}
+          </select>
+
+          {(searchTerm || selectedCategory !== 'all') && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearchTerm('');
+                setSelectedCategory('all');
+              }}
+              className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-200"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+
+        <div className="mt-3 flex items-center justify-between gap-3 text-xs text-slate-500">
+          <span>
+            Showing {filteredProducts.length} of {products.length} product{products.length !== 1 ? 's' : ''}
+          </span>
+          {selectedCategory !== 'all' && (
+            <span className="rounded-full bg-blue-50 px-3 py-1 font-semibold text-blue-700">
+              {selectedCategory}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Product Table */}
@@ -206,7 +289,7 @@ const ProductManagement = () => {
             </tr>
           </thead>
           <tbody className="divide-y">
-            {products.map((product) => (
+            {filteredProducts.map((product) => (
               <tr key={product.id} className="hover:bg-gray-50">
                 <td className="px-4 py-3">
                   {product.image_url ? (
@@ -255,9 +338,15 @@ const ProductManagement = () => {
             ))}
           </tbody>
         </table>
-        {products.length === 0 && (
-          <div className="text-center py-8 text-gray-500">
-            No products yet. Click "Add Product" to get started!
+        {filteredProducts.length === 0 && (
+          <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center text-slate-500">
+            <div className="text-3xl">🔍</div>
+            <p className="mt-2 font-semibold text-slate-700">
+              No products found.
+            </p>
+            <p className="mt-1 text-sm">
+              Try another keyword or category.
+            </p>
           </div>
         )}
       </div>
