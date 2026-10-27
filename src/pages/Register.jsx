@@ -1,13 +1,57 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../services/supabase';
+import motorPartsLogo from '../assets/motorparts.png';
+import '../styles/Register.css';
 
-const buildBaseUsername = (firstName) => {
-  const clean = String(firstName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  if (!clean) return 'user';
-  if (clean.length === 1) return `${clean}01`;
-  if (clean.length === 2) return `${clean}1`;
-  return clean.slice(0, 30);
+const InputIcon = ({ type }) => {
+  const paths = {
+    user: (
+      <>
+        <circle cx="12" cy="8" r="3.3" />
+        <path d="M5.5 19a6.5 6.5 0 0 1 13 0" />
+      </>
+    ),
+    mail: (
+      <>
+        <rect x="3.5" y="5" width="17" height="14" rx="2" />
+        <path d="m4 7 8 6 8-6" />
+      </>
+    ),
+    phone: (
+      <>
+        <path d="M6.4 3.8 9 3.2l1.5 4-1.7 1.5a13.5 13.5 0 0 0 6.5 6.5l1.5-1.7 4 1.5-.6 2.6a2.4 2.4 0 0 1-2.7 1.8C10.3 18.5 5.5 13.7 4.6 6.5a2.4 2.4 0 0 1 1.8-2.7Z" />
+      </>
+    ),
+    calendar: (
+      <>
+        <rect x="3.5" y="5" width="17" height="15" rx="2" />
+        <path d="M7 3v4M17 3v4M3.5 9.5h17" />
+      </>
+    ),
+    pin: (
+      <>
+        <path d="M12 21s6-5.5 6-11a6 6 0 1 0-12 0c0 5.5 6 11 6 11Z" />
+        <circle cx="12" cy="10" r="2" />
+      </>
+    ),
+  };
+
+  return (
+    <svg
+      width="17"
+      height="17"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {paths[type]}
+    </svg>
+  );
 };
 
 const Register = () => {
@@ -18,7 +62,7 @@ const Register = () => {
   const [isRegistered, setIsRegistered] = useState(false);
 
   const [formData, setFormData] = useState({
-    email: '',
+    username: '',
     last_name: '',
     first_name: '',
     middle_name: '',
@@ -30,81 +74,124 @@ const Register = () => {
     emergency_contact: '',
   });
 
-  const usernamePreview = useMemo(
-    () => buildBaseUsername(formData.first_name),
-    [formData.first_name]
-  );
-
   const handleChange = (e) => {
-    const { name, value } = e.target;
-    setFormData((current) => ({ ...current, [name]: value }));
+    setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (loading || isRegistered) return;
+
+    if (loading || isRegistered) {
+      setError('Registration already in progress or completed.');
+      return;
+    }
 
     setError('');
     setSuccess('');
     setLoading(true);
 
-    try {
-      const email = formData.email.trim().toLowerCase();
-      if (!/^\S+@\S+\.\S+$/.test(email)) {
-        throw new Error('Please enter a valid email address.');
-      }
+    const username = formData.username.trim().toLowerCase();
 
-      if (!formData.first_name.trim() || !formData.last_name.trim()) {
-        throw new Error('First Name and Last Name are required.');
-      }
-
-      if (formData.middle_name.length > 100) {
-        throw new Error('Middle Name must not exceed 100 characters.');
-      }
-
-      // Public registration is handled by a server-side Edge Function.
-      // This prevents Supabase's default "Confirm your email address" message
-      // and allows the app to send our branded pending-approval email instead.
-      const { data, error: registrationError } = await supabase.functions.invoke(
-        'public-register',
-        {
-          body: {
-            email,
-            last_name: formData.last_name.trim(),
-            first_name: formData.first_name.trim(),
-            middle_name: formData.middle_name.trim(),
-            suffix: formData.suffix.trim(),
-            contact_number: formData.contact_number.trim(),
-            address: formData.address.trim(),
-            birthdate: formData.birthdate,
-            gender: formData.gender,
-            emergency_contact: formData.emergency_contact.trim(),
-            website: '', // honeypot field
-          },
-        }
+    if (!/^[a-z0-9._-]{3,30}$/.test(username)) {
+      setError(
+        'Username must be 3-30 characters and use only letters, numbers, dot, underscore, or hyphen.'
       );
+      setLoading(false);
+      return;
+    }
 
-      if (registrationError) throw registrationError;
-      if (!data?.success) {
-        throw new Error(data?.error || 'Registration failed. Please try again.');
+    if (formData.middle_name && formData.middle_name.length > 100) {
+      setError('Middle Name must not exceed 100 characters.');
+      setLoading(false);
+      return;
+    }
+
+    const fullName = `${formData.last_name}, ${formData.first_name}${
+      formData.middle_name ? ` ${formData.middle_name}` : ''
+    }${formData.suffix ? ` ${formData.suffix}` : ''}`;
+
+    try {
+      const { data: existingUsername, error: usernameCheckError } =
+        await supabase
+          .from('users')
+          .select('username')
+          .eq('username', username)
+          .maybeSingle();
+
+      if (usernameCheckError) throw usernameCheckError;
+
+      if (existingUsername) {
+        setError(
+          '❌ Username already registered. Please choose another username.'
+        );
+        setLoading(false);
+        return;
+      }
+
+      const authEmail = `${username}@motorparts.local`;
+      const temporaryPassword = `${crypto.randomUUID()}A1!`;
+
+      const { data: authData, error: authError } =
+        await supabase.auth.signUp({
+          email: authEmail,
+          password: temporaryPassword,
+          options: {
+            data: {
+              signup_source: 'public_register',
+              username,
+              last_name: formData.last_name.trim(),
+              first_name: formData.first_name.trim(),
+              middle_name: formData.middle_name.trim(),
+              suffix: formData.suffix.trim(),
+              contact_number: formData.contact_number.trim(),
+              address: formData.address.trim(),
+              birthdate: formData.birthdate,
+              gender: formData.gender,
+              emergency_contact: formData.emergency_contact.trim(),
+              full_name: fullName,
+            },
+          },
+        });
+
+      if (authError) {
+        console.error('Auth error:', authError);
+
+        if (/rate limit/i.test(authError.message)) {
+          setError(
+            '⏳ Too many attempts. Please wait a while and try again.'
+          );
+          setLoading(false);
+          return;
+        }
+
+        if (/already registered|already exists/i.test(authError.message)) {
+          setError(
+            '❌ Username already registered. Please choose another username.'
+          );
+          setLoading(false);
+          return;
+        }
+
+        throw authError;
+      }
+
+      if (!authData?.user) {
+        throw new Error('Registration failed. Please try again.');
       }
 
       setIsRegistered(true);
-
       setSuccess(`✅ Registration submitted successfully!
 
-👤 Username: ${data.username}
-🆔 ID Number: ${data.idNumber}
-📧 Email: ${email}
-⏳ Status: Pending admin approval
-
-Please wait while the administrator reviews your registration.
-Once approved, you will receive an email with a secure link to set your own password.
+👤 Username: ${username}
+🆔 Your ID Number will be generated automatically by the system.
+⏳ Your account is now waiting for admin approval.
+📧 After approval, the admin will add your email address.
+🔑 The admin will also set or generate your login password.
 
 You will be redirected to the login page in 8 seconds...`);
 
       setFormData({
-        email: '',
+        username: '',
         last_name: '',
         first_name: '',
         middle_name: '',
@@ -116,135 +203,318 @@ You will be redirected to the login page in 8 seconds...`);
         emergency_contact: '',
       });
 
-      setTimeout(() => navigate('/login'), 8000);
+      setTimeout(() => {
+        navigate('/login');
+      }, 8000);
     } catch (err) {
       console.error('Registration error:', err);
-      setError(`❌ Registration failed: ${err.message || 'Unknown error'}`);
+      setError(
+        '❌ Registration failed: ' + (err.message || 'Unknown error')
+      );
     } finally {
       setLoading(false);
     }
   };
 
+  const field = (icon, label, name, options = {}) => (
+    <div className={`register-field ${options.className || ''}`}>
+      <label htmlFor={name} className="register-label">
+        {label}{options.required ? ' *' : ''}
+      </label>
+      <div className="register-input-shell">
+        {icon && (
+          <span className="register-input-icon">
+            <InputIcon type={icon} />
+          </span>
+        )}
+        <input
+          id={name}
+          type={options.type || 'text'}
+          name={name}
+          value={formData[name]}
+          onChange={handleChange}
+          className="register-input"
+          placeholder={options.placeholder}
+          minLength={options.minLength}
+          maxLength={options.maxLength}
+          required={options.required}
+          disabled={loading || isRegistered}
+        />
+      </div>
+      {options.help && <p className="register-help">{options.help}</p>}
+    </div>
+  );
+
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#dbeafe,_#f8fafc_45%,_#e2e8f0)] flex items-center justify-center p-4">
-      <div className="w-full max-w-2xl rounded-[28px] border border-white/70 bg-white/95 p-6 shadow-2xl backdrop-blur md:p-8">
-        <div className="mb-7 text-center">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-3xl">
-            🏍️
-          </div>
-          <p className="mt-4 text-xs font-semibold uppercase tracking-[0.24em] text-blue-600">
-            Motor Parts
-          </p>
-          <h1 className="mt-2 text-3xl font-black text-slate-900">Create Client Account</h1>
-          <p className="mt-2 text-sm text-slate-500">
-            Register your details and wait for admin approval. We'll email you only after your account is approved.
-          </p>
-        </div>
+    <div className="register-page">
+      <div className="register-glow register-glow-orange" />
+      <div className="register-glow register-glow-lime" />
 
-        {success && (
-          <div className="mb-5 whitespace-pre-line rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm leading-6 text-emerald-700">
-            {success}
-          </div>
-        )}
+      <div className="register-shell">
+        <header className="register-topbar">
+          <Link to="/" className="register-brand" aria-label="Motor Parts home">
+            <span className="register-logo-frame">
+              <img src={motorPartsLogo} alt="Motor Parts" />
+            </span>
+          </Link>
 
-        {error && (
-          <div className="mb-5 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-            {error}
-          </div>
-        )}
+          <Link to="/" className="register-home-link">
+            ← Home
+          </Link>
+        </header>
 
-        {!isRegistered ? (
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <section>
-              <h2 className="text-lg font-bold text-slate-900">Account Information</h2>
-              <p className="mb-4 text-sm text-slate-500">
-                Use your real email. You will create your own password after approval.
+        <main className="register-layout">
+          <section className="register-intro">
+            <div className="register-intro-glow register-intro-glow-a" />
+            <div className="register-intro-glow register-intro-glow-b" />
+
+            <div className="register-intro-content">
+              <div className="register-badge">
+                <span />
+                Client registration
+              </div>
+
+              <p className="register-kicker">Motor Parts Marketplace</p>
+
+              <h1>
+                Create your account.
+                <span>Get ready to ride.</span>
+              </h1>
+
+              <p className="register-lead">
+                Register your details once and wait for account approval.
+                Your login access is activated after the approval process.
               </p>
 
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="md:col-span-2">
-                  <label className="mb-2 block text-sm font-semibold text-slate-700">
-                    Email Address *
-                  </label>
-                  <input
-                    type="email"
-                    name="email"
-                    value={formData.email}
-                    onChange={handleChange}
-                    className="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
-                    placeholder="juan.delacruz@gmail.com"
-                    required
-                    disabled={loading}
-                  />
+              <div className="register-steps">
+                <div className="register-step active">
+                  <span>01</span>
+                  <div>
+                    <strong>Submit your details</strong>
+                    <p>Complete the client registration form.</p>
+                  </div>
                 </div>
 
-                <div className="md:col-span-2 rounded-2xl bg-blue-50 p-4">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-blue-700">
-                    Automatic Username
-                  </p>
-                  <p className="mt-1 text-sm text-blue-800">
-                    {formData.first_name
-                      ? `Your username will be: ${usernamePreview}`
-                      : 'Your username will be generated automatically from your first name.'}
+                <div className="register-step">
+                  <span>02</span>
+                  <div>
+                    <strong>Admin review</strong>
+                    <p>Your registration is checked by the administrator.</p>
+                  </div>
+                </div>
+
+                <div className="register-step">
+                  <span>03</span>
+                  <div>
+                    <strong>Activate your account</strong>
+                    <p>Receive approval, set your password, then sign in.</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="register-note">
+                <div className="register-note-icon">
+                  ✓
+                </div>
+                <div>
+                  <strong>Why register?</strong>
+                  <p>
+                    Keep your orders and receipts connected to your customer
+                    account for easier tracking.
                   </p>
                 </div>
               </div>
-            </section>
+            </div>
+          </section>
 
-            <section>
-              <h2 className="text-lg font-bold text-slate-900">Personal Information</h2>
-              <div className="mt-4 grid gap-4 md:grid-cols-2">
-                <input name="last_name" value={formData.last_name} onChange={handleChange} required placeholder="Last Name" className="w-full rounded-2xl border border-slate-300 px-4 py-3 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" disabled={loading} />
-                <input name="first_name" value={formData.first_name} onChange={handleChange} required placeholder="First Name" className="w-full rounded-2xl border border-slate-300 px-4 py-3 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" disabled={loading} />
-                <input name="middle_name" value={formData.middle_name} onChange={handleChange} maxLength="100" placeholder="Middle Name" className="w-full rounded-2xl border border-slate-300 px-4 py-3 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" disabled={loading} />
-                <input name="suffix" value={formData.suffix} onChange={handleChange} placeholder="Suffix (Jr., Sr., III)" className="w-full rounded-2xl border border-slate-300 px-4 py-3 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" disabled={loading} />
-                <input type="date" name="birthdate" value={formData.birthdate} onChange={handleChange} required className="w-full rounded-2xl border border-slate-300 px-4 py-3 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" disabled={loading} />
-                <select name="gender" value={formData.gender} onChange={handleChange} required className="w-full rounded-2xl border border-slate-300 px-4 py-3 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" disabled={loading}>
-                  <option value="Male">Male</option>
-                  <option value="Female">Female</option>
-                  <option value="Other">Other</option>
-                </select>
+          <section className="register-card">
+            <div className="register-card-header">
+              <div>
+                <p className="register-form-kicker">Create client account</p>
+                <h2>Personal details</h2>
+                <p>
+                  Fill in your information carefully. Fields marked with *
+                  are required.
+                </p>
               </div>
-            </section>
 
-            <section>
-              <h2 className="text-lg font-bold text-slate-900">Contact Information</h2>
-              <div className="mt-4 grid gap-4 md:grid-cols-2">
-                <input name="contact_number" value={formData.contact_number} onChange={handleChange} required placeholder="09123456789" className="w-full rounded-2xl border border-slate-300 px-4 py-3 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" disabled={loading} />
-                <input name="emergency_contact" value={formData.emergency_contact} onChange={handleChange} placeholder="Emergency Contact - 09123456789" className="w-full rounded-2xl border border-slate-300 px-4 py-3 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" disabled={loading} />
-                <textarea name="address" value={formData.address} onChange={handleChange} required rows="3" placeholder="Complete Address" className="md:col-span-2 w-full rounded-2xl border border-slate-300 px-4 py-3 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" disabled={loading} />
+              <div className="register-form-status">
+                <span className="status-dot" />
+                Requires approval
               </div>
-            </section>
-
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-              <strong>What happens next?</strong>
-              <div className="mt-2">1. Submit your registration.</div>
-              <div>2. Receive an email confirming that your account is pending approval.</div>
-              <div>3. Admin reviews your registration.</div>
-              <div>4. After approval, receive a secure password-setup email.</div>
-              <div>5. Set your password and sign in.</div>
             </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full rounded-2xl bg-blue-600 py-3.5 font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
-            >
-              {loading ? 'Submitting Registration...' : 'Register'}
-            </button>
-          </form>
-        ) : (
-          <div className="rounded-2xl border border-blue-200 bg-blue-50 p-5 text-center text-blue-800">
-            Registration submitted. Please wait for admin approval. You will receive an email after approval.
-          </div>
-        )}
+            {success && (
+              <div className="register-message register-message-success">
+                <div className="message-title">Registration received</div>
+                <div className="message-body">{success}</div>
+              </div>
+            )}
 
-        <div className="mt-6 border-t border-slate-200 pt-5 text-center text-sm text-slate-600">
-          Already have an account?{' '}
-          <Link to="/login" className="font-semibold text-blue-600 hover:underline">
-            Sign in
-          </Link>
-        </div>
+            {error && (
+              <div className="register-message register-message-error">
+                {error}
+              </div>
+            )}
+
+            {!isRegistered ? (
+              <form onSubmit={handleSubmit} className="register-form">
+                <div className="register-section-title">
+                  <span>01</span>
+                  Account
+                </div>
+
+                {field('user', 'Username', 'username', {
+                  required: true,
+                  minLength: 3,
+                  maxLength: 30,
+                  placeholder: 'juan.delacruz',
+                  help: 'Use 3–30 letters, numbers, dots, underscores, or hyphens.',
+                })}
+
+                <div className="register-section-title register-section-spaced">
+                  <span>02</span>
+                  Personal information
+                </div>
+
+                <div className="register-grid register-grid-two">
+                  {field(null, 'Last Name', 'last_name', {
+                    required: true,
+                    placeholder: 'Dela Cruz',
+                  })}
+                  {field(null, 'First Name', 'first_name', {
+                    required: true,
+                    placeholder: 'Juan',
+                  })}
+                  {field(null, 'Middle Name', 'middle_name', {
+                    maxLength: 100,
+                    placeholder: 'Middle name',
+                  })}
+                  {field(null, 'Suffix', 'suffix', {
+                    placeholder: 'Jr., Sr., III',
+                  })}
+                  {field('calendar', 'Birthdate', 'birthdate', {
+                    type: 'date',
+                    required: true,
+                  })}
+
+                  <div className="register-field">
+                    <label htmlFor="gender" className="register-label">
+                      Gender *
+                    </label>
+                    <div className="register-input-shell">
+                      <select
+                        id="gender"
+                        name="gender"
+                        value={formData.gender}
+                        onChange={handleChange}
+                        className="register-input register-select"
+                        required
+                        disabled={loading || isRegistered}
+                      >
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="register-section-title register-section-spaced">
+                  <span>03</span>
+                  Contact information
+                </div>
+
+                <div className="register-grid register-grid-two">
+                  {field('phone', 'Contact Number', 'contact_number', {
+                    required: true,
+                    placeholder: '09123456789',
+                  })}
+                  <div className="register-field">
+                    <label htmlFor="emergency_contact" className="register-label">
+                      Emergency Contact
+                    </label>
+                    <div className="register-input-shell">
+                      <span className="register-input-icon">
+                        <InputIcon type="phone" />
+                      </span>
+                      <input
+                        id="emergency_contact"
+                        type="text"
+                        name="emergency_contact"
+                        value={formData.emergency_contact}
+                        onChange={handleChange}
+                        className="register-input"
+                        placeholder="Name - 09123456789"
+                        disabled={loading || isRegistered}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="register-field register-field-full">
+                  <label htmlFor="address" className="register-label">
+                    Complete Address *
+                  </label>
+                  <div className="register-input-shell register-textarea-shell">
+                    <span className="register-input-icon register-textarea-icon">
+                      <InputIcon type="pin" />
+                    </span>
+                    <textarea
+                      id="address"
+                      name="address"
+                      value={formData.address}
+                      onChange={handleChange}
+                      className="register-input register-textarea"
+                      rows="3"
+                      placeholder="Street, Barangay, Municipality/City, Province"
+                      required
+                      disabled={loading || isRegistered}
+                    />
+                  </div>
+                </div>
+
+                <div className="register-process-card">
+                  <div className="register-process-icon">i</div>
+                  <div>
+                    <strong>What happens next?</strong>
+                    <ol>
+                      <li>Submit your registration.</li>
+                      <li>Your account enters the approval queue.</li>
+                      <li>After approval, your account can be activated for sign in.</li>
+                    </ol>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  className="register-submit"
+                  disabled={loading || isRegistered}
+                >
+                  {loading ? 'Submitting registration...' : 'Submit Registration'}
+                  {!loading && <span>→</span>}
+                </button>
+              </form>
+            ) : (
+              <div className="register-complete">
+                <div className="register-complete-icon">✓</div>
+                <h3>Registration submitted</h3>
+                <p>
+                  Your account is now waiting for admin approval. You will be
+                  redirected to the sign-in page shortly.
+                </p>
+                <Link to="/login" className="register-complete-link">
+                  Go to Sign In →
+                </Link>
+              </div>
+            )}
+
+            <div className="register-footer">
+              <span>Already have an account?</span>
+              <Link to="/login">Sign in here</Link>
+            </div>
+          </section>
+        </main>
       </div>
     </div>
   );

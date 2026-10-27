@@ -1,3 +1,4 @@
+
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../services/supabase';
 
@@ -40,19 +41,25 @@ const MyReceipts = ({ clientId }) => {
           id,
           order_date,
           total_amount,
+          amount_paid,
+          change_amount,
+          payment_method,
           status,
           admin_approved,
+          is_walk_in,
+          transaction_type,
           created_at,
           updated_at,
           order_items(
-            product:product_id(name, price, image_url),
             quantity,
             price_per_unit,
-            subtotal
+            subtotal,
+            item_source,
+            product:product_id(name, price, image_url)
           )
         `)
         .eq('client_id', clientId)
-        .in('status', ['pending', 'approved', 'cancelled'])
+        .in('status', ['pending', 'approved', 'completed', 'cancelled'])
         .order('created_at', { ascending: false });
 
       if (ordersError) throw ordersError;
@@ -74,6 +81,7 @@ const MyReceipts = ({ clientId }) => {
           sent_to_client,
           generated_at,
           approved_at,
+          status,
           order_id
         `)
         .in('order_id', orderIds);
@@ -102,8 +110,18 @@ const MyReceipts = ({ clientId }) => {
       orders.filter(
         (order) =>
           order.status === 'pending' &&
-          !order.admin_approved &&
           receiptByOrder.has(order.id)
+      ),
+    [orders, receiptByOrder]
+  );
+
+  const paidOrders = useMemo(
+    () =>
+      orders.filter(
+        (order) =>
+          order.status === 'completed' &&
+          receiptByOrder.get(order.id)?.status === 'completed' &&
+          receiptByOrder.get(order.id)?.sent_to_client === true
       ),
     [orders, receiptByOrder]
   );
@@ -113,9 +131,7 @@ const MyReceipts = ({ clientId }) => {
       orders.filter(
         (order) =>
           order.status === 'approved' &&
-          order.admin_approved &&
-          receiptByOrder.get(order.id)?.is_approved === true &&
-          receiptByOrder.get(order.id)?.sent_to_client === true
+          receiptByOrder.get(order.id)?.is_approved === true
       ),
     [orders, receiptByOrder]
   );
@@ -127,7 +143,7 @@ const MyReceipts = ({ clientId }) => {
 
   const handleCancelOrder = async (orderId) => {
     const confirmed = window.confirm(
-      'Cancel this order? This can only be done while the order is still waiting for admin approval.'
+      'Cancel this pending online order? The reserved stock will be returned.'
     );
 
     if (!confirmed) return;
@@ -145,7 +161,7 @@ const MyReceipts = ({ clientId }) => {
       if (cancelError) throw cancelError;
 
       setMessage(
-        '✅ Order cancelled successfully. The reserved stock has been returned to inventory.'
+        '✅ Order cancelled successfully. The reserved stock has been returned.'
       );
 
       await fetchReceipts();
@@ -160,10 +176,23 @@ const MyReceipts = ({ clientId }) => {
     }
   };
 
-  const renderOrderReceipt = (order, type = 'approved') => {
+  const renderSourceBadge = (source) => (
+    <span
+      className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${
+        source === 'walk_in'
+          ? 'bg-orange-100 text-orange-700'
+          : 'bg-blue-100 text-blue-700'
+      }`}
+    >
+      {source === 'walk_in' ? 'WALK-IN' : 'ONLINE'}
+    </span>
+  );
+
+  const renderOrderCard = (order, mode) => {
     const receipt = receiptByOrder.get(order.id);
-    const isPending = type === 'pending';
-    const isCancelled = type === 'cancelled';
+    const isPending = mode === 'pending';
+    const isCancelled = mode === 'cancelled';
+    const isMixed = order.transaction_type === 'mixed';
 
     return (
       <article
@@ -183,10 +212,14 @@ const MyReceipts = ({ clientId }) => {
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-white/70">
                 {isPending
-                  ? 'Awaiting Approval'
+                  ? 'Pending — Not Yet Paid'
                   : isCancelled
                     ? 'Cancelled Order'
-                    : 'Transaction Receipt'}
+                    : isMixed
+                      ? 'Completed Checkout — Online + Walk-in'
+                      : order.transaction_type === 'walk_in'
+                        ? 'Completed Walk-in Sale'
+                        : 'Completed Online Order'}
               </p>
 
               <h3 className="mt-1 text-2xl font-black">
@@ -206,10 +239,10 @@ const MyReceipts = ({ clientId }) => {
               </p>
               <p className="mt-1 font-bold">
                 {isPending
-                  ? '⏳ Waiting for Admin Approval'
+                  ? '⏳ Waiting for Payment'
                   : isCancelled
                     ? '✕ Cancelled'
-                    : '✓ Approved'}
+                    : '✓ Paid'}
               </p>
             </div>
           </div>
@@ -217,13 +250,13 @@ const MyReceipts = ({ clientId }) => {
 
         {isPending && (
           <div className="border-b border-amber-100 bg-amber-50 px-6 py-4">
-            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
                 <p className="font-semibold text-amber-900">
-                  Your order is waiting for admin approval.
+                  This order has been recorded, but payment is still pending.
                 </p>
-                <p className="mt-1 text-sm leading-6 text-amber-700">
-                  You can still cancel this order while it is pending.
+                <p className="mt-1 text-sm text-amber-700">
+                  Payment will be completed at the shop using cash.
                 </p>
               </div>
 
@@ -231,7 +264,7 @@ const MyReceipts = ({ clientId }) => {
                 type="button"
                 onClick={() => handleCancelOrder(order.id)}
                 disabled={cancellingOrderId === order.id}
-                className="rounded-2xl bg-rose-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-2xl bg-rose-600 px-5 py-3 text-sm font-semibold text-white hover:bg-rose-700 disabled:opacity-60"
               >
                 {cancellingOrderId === order.id
                   ? 'Cancelling...'
@@ -248,17 +281,35 @@ const MyReceipts = ({ clientId }) => {
             </p>
 
             <div className="mt-4 space-y-3 text-sm">
-              <div className="flex items-start justify-between gap-4">
+              <div className="flex justify-between gap-4">
                 <span className="text-slate-500">Order Date</span>
                 <span className="text-right font-medium text-slate-800">
                   {formatDateTime(order.order_date)}
                 </span>
               </div>
 
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-slate-500">Order Status</span>
+              <div className="flex justify-between gap-4">
+                <span className="text-slate-500">Transaction Type</span>
+                <span className="text-right font-semibold text-slate-800">
+                  {isMixed
+                    ? 'Mixed: Online + Walk-in'
+                    : order.transaction_type === 'walk_in'
+                      ? 'Walk-in'
+                      : 'Online'}
+                </span>
+              </div>
+
+              <div className="flex justify-between gap-4">
+                <span className="text-slate-500">Payment Method</span>
+                <span className="text-right font-semibold text-slate-800">
+                  {order.payment_method || 'Cash'}
+                </span>
+              </div>
+
+              <div className="flex justify-between gap-4">
+                <span className="text-slate-500">Payment Status</span>
                 <span
-                  className={`font-semibold ${
+                  className={`text-right font-semibold ${
                     isPending
                       ? 'text-amber-600'
                       : isCancelled
@@ -267,26 +318,7 @@ const MyReceipts = ({ clientId }) => {
                   }`}
                 >
                   {isPending
-                    ? 'Pending Approval'
-                    : isCancelled
-                      ? 'Cancelled'
-                      : 'Approved'}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-slate-500">Payment Status</span>
-                <span
-                  className={`font-semibold ${
-                    isPending
-                      ? 'text-amber-600'
-                      : isCancelled
-                        ? 'text-slate-500'
-                        : 'text-emerald-600'
-                  }`}
-                >
-                  {isPending
-                    ? 'Awaiting Approval'
+                    ? 'Pending Payment'
                     : isCancelled
                       ? 'Cancelled'
                       : 'Paid'}
@@ -301,7 +333,7 @@ const MyReceipts = ({ clientId }) => {
             </p>
 
             <div className="mt-4 space-y-3 text-sm">
-              <div className="flex items-start justify-between gap-4">
+              <div className="flex justify-between gap-4">
                 <span className="text-slate-500">Receipt</span>
                 <span className="text-right font-medium text-slate-800">
                   {receipt?.receipt_number
@@ -310,7 +342,7 @@ const MyReceipts = ({ clientId }) => {
                 </span>
               </div>
 
-              <div className="flex items-start justify-between gap-4">
+              <div className="flex justify-between gap-4">
                 <span className="text-slate-500">Generated</span>
                 <span className="text-right font-medium text-slate-800">
                   {receipt?.generated_at
@@ -319,14 +351,10 @@ const MyReceipts = ({ clientId }) => {
                 </span>
               </div>
 
-              <div className="flex items-start justify-between gap-4">
-                <span className="text-slate-500">Approved</span>
-                <span className="text-right font-medium text-slate-800">
-                  {receipt?.approved_at
-                    ? formatDateTime(receipt.approved_at)
-                    : isPending
-                      ? 'Waiting for admin'
-                      : 'N/A'}
+              <div className="flex justify-between gap-4">
+                <span className="text-slate-500">Receipt Status</span>
+                <span className="text-right font-semibold text-slate-800">
+                  {receipt?.status || 'Pending'}
                 </span>
               </div>
             </div>
@@ -334,35 +362,59 @@ const MyReceipts = ({ clientId }) => {
         </div>
 
         <div className="p-6">
-          <div className="mb-4 flex items-center justify-between gap-3">
+          <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-600">
-                {isCancelled ? 'Cancelled Items' : 'Purchased Items'}
+                {isCancelled ? 'Cancelled Items' : 'Receipt Items'}
               </p>
               <h4 className="mt-1 text-xl font-black text-slate-950">
-                Order Summary
+                {isMixed ? 'One Receipt — Two Item Sources' : 'Order Summary'}
               </h4>
             </div>
 
-            <div className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600">
-              {order.order_items?.length || 0} item
-              {(order.order_items?.length || 0) !== 1 ? 's' : ''}
-            </div>
+            {isMixed && (
+              <div className="rounded-full bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700">
+                ONE RECEIPT • ONE PAYMENT
+              </div>
+            )}
           </div>
 
+          {isMixed && (
+            <div className="mb-4 grid gap-3 sm:grid-cols-2">
+              <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
+                <p className="text-xs font-bold uppercase tracking-wide text-blue-700">
+                  ONLINE
+                </p>
+                <p className="mt-1 text-sm text-blue-900">
+                  Items originally ordered online and paid at this checkout.
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-orange-200 bg-orange-50 p-4">
+                <p className="text-xs font-bold uppercase tracking-wide text-orange-700">
+                  WALK-IN
+                </p>
+                <p className="mt-1 text-sm text-orange-900">
+                  New items added by the client at the shop.
+                </p>
+              </div>
+            </div>
+          )}
+
           <div className="overflow-hidden rounded-2xl border border-slate-200">
-            <div className="hidden grid-cols-[1.6fr_0.45fr_0.75fr_0.9fr] bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 md:grid">
+            <div className="hidden grid-cols-[1.4fr_0.42fr_0.7fr_0.75fr_0.8fr] bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 md:grid">
               <div>Product</div>
               <div>Qty</div>
               <div>Price</div>
+              <div>Source</div>
               <div className="text-right">Subtotal</div>
             </div>
 
             <div className="divide-y divide-slate-100">
               {(order.order_items || []).map((item, index) => (
                 <div
-                  key={index}
-                  className="grid gap-4 px-4 py-4 md:grid-cols-[1.6fr_0.45fr_0.75fr_0.9fr] md:items-center"
+                  key={`${item.product?.name || 'item'}-${index}`}
+                  className="grid gap-4 px-4 py-4 md:grid-cols-[1.4fr_0.42fr_0.7fr_0.75fr_0.8fr] md:items-center"
                 >
                   <div className="flex items-center gap-4">
                     <div className="h-16 w-16 shrink-0 overflow-hidden rounded-xl border border-slate-200 bg-slate-100">
@@ -400,6 +452,13 @@ const MyReceipts = ({ clientId }) => {
                     {money(item.price_per_unit)}
                   </div>
 
+                  <div>
+                    <span className="md:hidden mr-2 text-xs font-medium text-slate-500">
+                      Source:
+                    </span>
+                    {renderSourceBadge(item.item_source)}
+                  </div>
+
                   <div className="font-semibold text-slate-900 md:text-right">
                     <span className="mr-1 text-xs text-slate-500 md:hidden">
                       Subtotal:
@@ -411,28 +470,54 @@ const MyReceipts = ({ clientId }) => {
             </div>
           </div>
 
-          <div className="mt-5 flex flex-col gap-4 rounded-[22px] bg-slate-950 p-5 text-white sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-sm text-slate-300">Grand Total</p>
-              <p className="mt-1 text-3xl font-black">
-                {money(order.total_amount)}
-              </p>
+          <div className="mt-5 grid gap-4 lg:grid-cols-[1fr_auto] lg:items-stretch">
+            <div className="rounded-[22px] bg-slate-950 p-5 text-white">
+              <div className="flex justify-between text-sm text-slate-300">
+                <span>Grand Total</span>
+                <span className="text-2xl font-black text-white">
+                  {money(order.total_amount)}
+                </span>
+              </div>
+
+              {order.status === 'completed' && (
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-2xl bg-white/5 p-4">
+                    <p className="text-xs uppercase tracking-wide text-slate-400">
+                      Cash Received
+                    </p>
+                    <p className="mt-1 text-lg font-black">
+                      {money(order.amount_paid)}
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl bg-white/5 p-4">
+                    <p className="text-xs uppercase tracking-wide text-slate-400">
+                      Change
+                    </p>
+                    <p className="mt-1 text-lg font-black">
+                      {money(order.change_amount)}
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div
-              className={`rounded-2xl px-4 py-3 text-sm font-semibold ${
+              className={`rounded-[22px] px-5 py-4 text-sm font-semibold ${
                 isPending
-                  ? 'bg-amber-400/15 text-amber-300'
+                  ? 'bg-amber-50 text-amber-700'
                   : isCancelled
-                    ? 'bg-rose-400/15 text-rose-300'
-                    : 'bg-emerald-500/15 text-emerald-300'
+                    ? 'bg-rose-50 text-rose-700'
+                    : 'bg-emerald-50 text-emerald-700'
               }`}
             >
               {isPending
-                ? '⏳ Awaiting Admin Approval'
+                ? '⏳ Pay at the shop'
                 : isCancelled
-                  ? '✕ Order Cancelled'
-                  : '✓ Receipt Approved'}
+                  ? '✕ Cancelled'
+                  : isMixed
+                    ? '✓ Paid in one checkout'
+                    : '✓ Paid'}
             </div>
           </div>
         </div>
@@ -456,20 +541,20 @@ const MyReceipts = ({ clientId }) => {
   return (
     <div>
       <div className="mb-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-600">
+          Purchase History
+        </p>
+        <div className="mt-1 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-600">
-              Purchase History
-            </p>
-            <h2 className="mt-1 text-3xl font-black tracking-tight text-slate-950">
+            <h2 className="text-3xl font-black tracking-tight text-slate-950">
               My Receipts
             </h2>
             <p className="mt-2 text-sm leading-6 text-slate-500">
-              Pending orders and approved receipts are shown here in full.
+              Pending orders, approved receipts, and paid shop transactions.
             </p>
           </div>
 
-          <div className="inline-flex w-fit items-center rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
+          <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
             {orders.length} transaction{orders.length !== 1 ? 's' : ''}
           </div>
         </div>
@@ -491,18 +576,39 @@ const MyReceipts = ({ clientId }) => {
         <section className="mb-8">
           <div className="mb-4">
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-600">
-              Waiting for Approval
+              Waiting for Payment
             </p>
             <h3 className="mt-1 text-2xl font-black text-slate-950">
               Pending Orders
             </h3>
+          </div>
+
+          <div className="space-y-6">
+            {pendingOrders.map((order) =>
+              renderOrderCard(order, 'pending')
+            )}
+          </div>
+        </section>
+      )}
+
+      {paidOrders.length > 0 && (
+        <section className="mb-8">
+          <div className="mb-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-600">
+              Paid Transactions
+            </p>
+            <h3 className="mt-1 text-2xl font-black text-slate-950">
+              Completed Receipts
+            </h3>
             <p className="mt-1 text-sm text-slate-500">
-              These orders were prepared by the employee and are still waiting for admin approval.
+              A mixed checkout is displayed as one receipt, with each item marked ONLINE or WALK-IN.
             </p>
           </div>
 
           <div className="space-y-6">
-            {pendingOrders.map((order) => renderOrderReceipt(order, 'pending'))}
+            {paidOrders.map((order) =>
+              renderOrderCard(order, 'paid')
+            )}
           </div>
         </section>
       )}
@@ -510,19 +616,18 @@ const MyReceipts = ({ clientId }) => {
       {approvedOrders.length > 0 && (
         <section className="mb-8">
           <div className="mb-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-600">
-              Completed Approval
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-blue-600">
+              Previously Approved
             </p>
             <h3 className="mt-1 text-2xl font-black text-slate-950">
               Approved Receipts
             </h3>
-            <p className="mt-1 text-sm text-slate-500">
-              Your approved transaction receipts are displayed below in full.
-            </p>
           </div>
 
           <div className="space-y-6">
-            {approvedOrders.map((order) => renderOrderReceipt(order, 'approved'))}
+            {approvedOrders.map((order) =>
+              renderOrderCard(order, 'approved')
+            )}
           </div>
         </section>
       )}
@@ -536,20 +641,18 @@ const MyReceipts = ({ clientId }) => {
             <h3 className="mt-1 text-2xl font-black text-slate-950">
               Cancelled Orders
             </h3>
-            <p className="mt-1 text-sm text-slate-500">
-              Cancelled orders remain in your transaction history for reference.
-            </p>
           </div>
 
           <div className="space-y-6">
             {cancelledOrders.map((order) =>
-              renderOrderReceipt(order, 'cancelled')
+              renderOrderCard(order, 'cancelled')
             )}
           </div>
         </section>
       )}
 
       {pendingOrders.length === 0 &&
+        paidOrders.length === 0 &&
         approvedOrders.length === 0 &&
         cancelledOrders.length === 0 && (
           <div className="rounded-[28px] border border-dashed border-slate-300 bg-white p-10 text-center shadow-sm">
@@ -558,7 +661,7 @@ const MyReceipts = ({ clientId }) => {
               You don't have any transaction receipts yet.
             </p>
             <p className="mt-2 text-sm text-slate-500">
-              Your orders will appear here after an employee creates them.
+              Your orders will appear here after you place or complete a purchase.
             </p>
           </div>
         )}

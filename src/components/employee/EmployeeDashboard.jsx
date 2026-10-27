@@ -4,6 +4,7 @@ import { supabase } from '../../services/supabase';
 import ProductManagement from './ProductManagement';
 import ClientManagement from './ClientManagement';
 import OrderManagement from './OrderManagement';
+import ReceiptApprovals from './EmployeeReceiptApprovals';
 
 const employeeTabs = [
   {
@@ -26,6 +27,13 @@ const employeeTabs = [
     icon: '💰',
     eyebrow: 'Sales flow',
     description: 'Track orders, process requests, and keep transactions moving.'
+  },
+  {
+    key: 'receipts',
+    label: 'Receipts',
+    icon: '🧾',
+    eyebrow: 'Finance',
+    description: 'Review receipts, approve sales, and view customer transaction records.'
   }
 ];
 
@@ -174,6 +182,7 @@ const EmployeeDashboard = () => {
             {activeTab === 'products' && <ProductManagement />}
             {activeTab === 'clients' && <ClientManagement />}
             {activeTab === 'orders' && <OrderManagement />}
+            {activeTab === 'receipts' && <ReceiptApprovals />}
           </div>
           </section>
         </div>

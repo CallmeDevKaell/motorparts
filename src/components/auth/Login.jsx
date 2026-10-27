@@ -1,6 +1,47 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../../services/supabase';
+import motorPartsLogo from '../../assets/motorparts.png';
+import '../../styles/Login.css';
+
+const FieldIcon = ({ type }) => {
+  const paths = {
+    user: (
+      <>
+        <circle cx="12" cy="8" r="3.5" />
+        <path d="M5.5 19a6.5 6.5 0 0 1 13 0" />
+      </>
+    ),
+    lock: (
+      <>
+        <rect x="5" y="10" width="14" height="10" rx="2" />
+        <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+      </>
+    ),
+    shield: (
+      <>
+        <path d="M12 3 19 6v5c0 4.9-3 8.4-7 10-4-1.6-7-5.1-7-10V6l7-3Z" />
+        <path d="m9 12 2 2 4-4" />
+      </>
+    ),
+  };
+
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {paths[type]}
+    </svg>
+  );
+};
 
 const Login = () => {
   const [identifier, setIdentifier] = useState('');
@@ -24,7 +65,6 @@ const Login = () => {
       const hasSession = Boolean(sessionData?.session);
 
       if (hasSetupMode || hasSession) {
-        // We only show the password form for an explicit setup/recovery flow.
         if (hasSetupMode) setIsRecoveryMode(true);
       }
     };
@@ -66,13 +106,19 @@ const Login = () => {
         loginEmail = userRow.email;
       }
 
-      const { data, error: signInError } = await supabase.auth.signInWithPassword({
-        email: loginEmail,
-        password,
-      });
+      const { data, error: signInError } =
+        await supabase.auth.signInWithPassword({
+          email: loginEmail,
+          password,
+        });
 
       if (signInError) throw new Error(signInError.message);
-      if (!data?.user) throw new Error('No user data received. Please check your credentials.');
+
+      if (!data?.user) {
+        throw new Error(
+          'No user data received. Please check your credentials.'
+        );
+      }
 
       const { data: userData, error: userError } = await supabase
         .from('users')
@@ -81,12 +127,16 @@ const Login = () => {
         .single();
 
       if (userError) {
-        throw new Error('User account not found in system. Please contact admin.');
+        throw new Error(
+          'User account not found in system. Please contact admin.'
+        );
       }
 
       if (!userData.is_approved) {
         await supabase.auth.signOut();
-        throw new Error('Your account is pending approval. Please wait for admin confirmation.');
+        throw new Error(
+          'Your account is pending approval. Please wait for admin confirmation.'
+        );
       }
 
       switch (userData.role) {
@@ -104,7 +154,9 @@ const Login = () => {
       }
     } catch (err) {
       console.error('Login error:', err);
-      setError(err.message || 'Login failed. Please check your credentials.');
+      setError(
+        err.message || 'Login failed. Please check your credentials.'
+      );
     } finally {
       setLoading(false);
     }
@@ -134,7 +186,9 @@ const Login = () => {
 
       if (updateError) throw updateError;
 
-      setRecoveryMessage('✅ Your password has been set successfully. Redirecting to sign in...');
+      setRecoveryMessage(
+        'Your password has been set successfully. Redirecting to sign in...'
+      );
 
       await supabase.auth.signOut();
 
@@ -148,219 +202,296 @@ const Login = () => {
       }, 1200);
     } catch (err) {
       console.error('Password setup error:', err);
-      setError(err.message || 'Unable to set your password. Please request a new setup link.');
+      setError(
+        err.message ||
+          'Unable to set your password. Please request a new setup link.'
+      );
     } finally {
       setLoading(false);
     }
   };
 
+  const signInFeatures = [
+    {
+      title: 'Admin',
+      text: 'Approvals, reports, and account management.',
+      badge: '01',
+    },
+    {
+      title: 'Employee',
+      text: 'Products, orders, and customer handling.',
+      badge: '02',
+    },
+    {
+      title: 'Client',
+      text: 'Browse parts, place orders, and view receipts.',
+      badge: '03',
+    },
+  ];
+
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#dbeafe,_#f8fafc_42%,_#e2e8f0)] px-4 py-8 lg:px-8">
-      <div className="mx-auto grid max-w-6xl gap-6 lg:grid-cols-[0.95fr_1.05fr]">
-        <section className="relative overflow-hidden rounded-[28px] bg-slate-950 p-8 text-white shadow-2xl lg:p-10">
-          <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(37,99,235,0.3),transparent_45%,rgba(14,165,233,0.22))]" />
-          <div className="relative">
-            <div className="inline-flex rounded-full border border-white/15 bg-white/10 px-4 py-1 text-sm font-semibold backdrop-blur">
-              Secure Account Access
-            </div>
+    <div className="login-page">
+      <div className="login-orb login-orb-one" />
+      <div className="login-orb login-orb-two" />
 
-            <h1 className="mt-6 text-4xl font-black leading-tight lg:text-5xl">
-              Motor Parts
-              <span className="block text-blue-300">
-                {isRecoveryMode ? 'Set your password.' : 'Management System.'}
-              </span>
-            </h1>
+      <div className="login-shell">
+        <header className="login-topbar">
+          <Link to="/" className="login-brand" aria-label="Motor Parts home">
+            <span className="login-brand-logo">
+              <img
+                src={motorPartsLogo}
+                alt="Motor Parts"
+              />
+            </span>
+          </Link>
 
-            <p className="mt-4 max-w-xl text-sm leading-7 text-slate-200 lg:text-base">
-              {isRecoveryMode
-                ? 'Your account has been approved. Create your personal password to finish activating your account.'
-                : 'Sign in securely as an admin, employee, or client and continue to your workspace.'}
-            </p>
+          <Link to="/" className="login-home-link">
+            ← Home
+          </Link>
+        </header>
 
-            <div className="mt-8 grid gap-4 sm:grid-cols-3">
-              <div className="rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur-sm">
-                <p className="text-2xl">👑</p>
-                <p className="mt-2 text-sm font-semibold">Admin</p>
-                <p className="mt-1 text-xs text-slate-300">Approvals, reports, and account management.</p>
+        <main className="login-main">
+          <section className="login-showcase">
+            <div className="showcase-glow showcase-glow-orange" />
+            <div className="showcase-glow showcase-glow-lime" />
+
+            <div className="showcase-content">
+              <div className="showcase-top">
+                <span className="showcase-pill">
+                  <span className="status-dot" />
+                  Secure account access
+                </span>
+
+                <span className="showcase-shield">
+                  <FieldIcon type="shield" />
+                </span>
               </div>
-              <div className="rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur-sm">
-                <p className="text-2xl">🏍️</p>
-                <p className="mt-2 text-sm font-semibold">Employee</p>
-                <p className="mt-1 text-xs text-slate-300">Products, orders, and client handling.</p>
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur-sm">
-                <p className="text-2xl">🧾</p>
-                <p className="mt-2 text-sm font-semibold">Client</p>
-                <p className="mt-1 text-xs text-slate-300">Browse items and review receipts.</p>
-              </div>
-            </div>
 
-            <div className="mt-10 rounded-3xl border border-white/10 bg-white/10 p-6 backdrop-blur-sm">
-              <p className="text-sm font-semibold uppercase tracking-[0.24em] text-sky-200">
-                Account Flow
-              </p>
-              <p className="mt-3 text-sm leading-6 text-slate-200">
-                Register → Admin Approval → Approval Email → Set Password → Sign In
-              </p>
-            </div>
-          </div>
-        </section>
+              <div className="showcase-copy">
+                <p className="showcase-kicker">Motor Parts Management System</p>
 
-        <section className="rounded-[28px] border border-white/70 bg-white/90 p-6 shadow-xl backdrop-blur lg:p-8">
-          {!isRecoveryMode ? (
-            <>
-              <div className="mb-8 border-b border-slate-200 pb-5">
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-600">
-                  Welcome Back
-                </p>
-                <h2 className="mt-2 text-3xl font-bold text-slate-900">Sign In</h2>
-                <p className="mt-2 text-sm text-slate-500">
-                  Enter your username or email and password to continue.
+                <h1>
+                  Welcome back.
+                  <span>Your workspace is ready.</span>
+                </h1>
+
+                <p className="showcase-description">
+                  Sign in securely and continue managing motorcycle parts,
+                  customers, orders, inventory, and receipts from one place.
                 </p>
               </div>
 
-              <form onSubmit={handleLogin} className="space-y-5">
-                <div>
-                  <label className="mb-2 block text-sm font-semibold text-slate-700">
-                    Username or Email
-                  </label>
-                  <input
-                    type="text"
-                    value={identifier}
-                    onChange={(e) => setIdentifier(e.target.value)}
-                    className="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
-                    placeholder="Enter your username or email"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="mb-2 block text-sm font-semibold text-slate-700">Password</label>
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
-                    placeholder="Enter your password"
-                    required
-                  />
-                </div>
-
-                {error && (
-                  <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                    {error}
+              <div className="role-grid">
+                {signInFeatures.map((feature) => (
+                  <div className="role-card" key={feature.title}>
+                    <div className="role-card-top">
+                      <span>{feature.badge}</span>
+                      <span className="role-dot" />
+                    </div>
+                    <strong>{feature.title}</strong>
+                    <p>{feature.text}</p>
                   </div>
-                )}
-
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full rounded-2xl bg-slate-900 py-3 font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {loading ? 'Signing in...' : 'Sign In'}
-                </button>
-              </form>
-
-              <div className="mt-6 flex flex-col gap-4 border-t border-slate-200 pt-5 text-sm text-slate-600 md:flex-row md:items-center md:justify-between">
-                <Link to="/" className="font-medium text-blue-600 hover:underline">
-                  ← Back to Home
-                </Link>
-                <p>
-                  Don't have an account?{' '}
-                  <Link to="/register" className="font-semibold text-blue-600 hover:underline">
-                    Register here
-                  </Link>
-                </p>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="mb-8 border-b border-slate-200 pb-5">
-                <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-2xl">
-                  🔐
-                </div>
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-600">
-                  Account Approved
-                </p>
-                <h2 className="mt-2 text-3xl font-bold text-slate-900">Set Your Password</h2>
-                <p className="mt-2 text-sm leading-6 text-slate-500">
-                  Create a new password for your Motor Parts account. You will use this password
-                  for future sign-ins.
-                </p>
+                ))}
               </div>
 
-              <form onSubmit={handleSetPassword} className="space-y-5">
+              <div className="account-flow">
+                <div className="flow-icon">✓</div>
                 <div>
-                  <label className="mb-2 block text-sm font-semibold text-slate-700">
-                    New Password
-                  </label>
-                  <input
-                    type="password"
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    className="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
-                    placeholder="At least 8 characters"
-                    minLength="8"
-                    required
-                    disabled={loading}
-                  />
+                  <p className="flow-label">Account flow</p>
+                  <p className="flow-text">
+                    Register → Admin Approval → Approval Email → Set Password
+                    → Sign In
+                  </p>
                 </div>
-
-                <div>
-                  <label className="mb-2 block text-sm font-semibold text-slate-700">
-                    Confirm Password
-                  </label>
-                  <input
-                    type="password"
-                    value={confirmNewPassword}
-                    onChange={(e) => setConfirmNewPassword(e.target.value)}
-                    className="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
-                    placeholder="Re-enter your password"
-                    minLength="8"
-                    required
-                    disabled={loading}
-                  />
-                </div>
-
-                {error && (
-                  <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                    {error}
-                  </div>
-                )}
-
-                {recoveryMessage && (
-                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-                    {recoveryMessage}
-                  </div>
-                )}
-
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full rounded-2xl bg-blue-600 py-3 font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {loading ? 'Saving Password...' : 'Set Password'}
-                </button>
-              </form>
-
-              <div className="mt-6 border-t border-slate-200 pt-5 text-center text-sm">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsRecoveryMode(false);
-                    setError('');
-                    setRecoveryMessage('');
-                    setNewPassword('');
-                    setConfirmNewPassword('');
-                  }}
-                  className="font-semibold text-blue-600 hover:underline"
-                >
-                  ← Back to Sign In
-                </button>
               </div>
-            </>
-          )}
-        </section>
+            </div>
+          </section>
+
+          <section className="login-card">
+            <div className="login-card-inner">
+              {!isRecoveryMode ? (
+                <>
+                  <div className="form-heading">
+                    <p className="form-kicker">Welcome back</p>
+                    <h2>Sign in</h2>
+                    <p>
+                      Enter your username or email and password to access your
+                      account.
+                    </p>
+                  </div>
+
+                  <form onSubmit={handleLogin} className="login-form">
+                    <div className="field-group">
+                      <label htmlFor="identifier">Username or Email</label>
+
+                      <div className="input-shell">
+                        <span className="input-icon">
+                          <FieldIcon type="user" />
+                        </span>
+
+                        <input
+                          id="identifier"
+                          type="text"
+                          value={identifier}
+                          onChange={(e) => setIdentifier(e.target.value)}
+                          placeholder="Enter username or email"
+                          autoComplete="username"
+                          required
+                        />
+                      </div>
+                    </div>
+
+                    <div className="field-group">
+                      <div className="field-label-row">
+                        <label htmlFor="password">Password</label>
+                        <span>Secure sign-in</span>
+                      </div>
+
+                      <div className="input-shell">
+                        <span className="input-icon">
+                          <FieldIcon type="lock" />
+                        </span>
+
+                        <input
+                          id="password"
+                          type="password"
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          placeholder="Enter your password"
+                          autoComplete="current-password"
+                          required
+                        />
+                      </div>
+                    </div>
+
+                    {error && (
+                      <div className="login-alert login-alert-error">
+                        {error}
+                      </div>
+                    )}
+
+                    <button
+                      type="submit"
+                      disabled={loading}
+                      className="login-submit"
+                    >
+                      {loading ? 'Signing in...' : 'Sign In'}
+                    </button>
+                  </form>
+
+                  <div className="form-footer">
+                    <Link to="/">← Back to Home</Link>
+
+                    <p>
+                      Don&apos;t have an account?{' '}
+                      <Link to="/register">Register here</Link>
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="recovery-icon">
+                    <FieldIcon type="lock" />
+                  </div>
+
+                  <div className="form-heading recovery-heading">
+                    <p className="form-kicker">Account approved</p>
+                    <h2>Set your password</h2>
+                    <p>
+                      Create your password to finish activating your account.
+                    </p>
+                  </div>
+
+                  <form onSubmit={handleSetPassword} className="login-form">
+                    <div className="field-group">
+                      <label htmlFor="new-password">New Password</label>
+
+                      <div className="input-shell">
+                        <span className="input-icon">
+                          <FieldIcon type="lock" />
+                        </span>
+
+                        <input
+                          id="new-password"
+                          type="password"
+                          value={newPassword}
+                          onChange={(e) => setNewPassword(e.target.value)}
+                          placeholder="At least 8 characters"
+                          minLength="8"
+                          autoComplete="new-password"
+                          required
+                          disabled={loading}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="field-group">
+                      <label htmlFor="confirm-password">
+                        Confirm Password
+                      </label>
+
+                      <div className="input-shell">
+                        <span className="input-icon">
+                          <FieldIcon type="lock" />
+                        </span>
+
+                        <input
+                          id="confirm-password"
+                          type="password"
+                          value={confirmNewPassword}
+                          onChange={(e) =>
+                            setConfirmNewPassword(e.target.value)
+                          }
+                          placeholder="Re-enter your password"
+                          minLength="8"
+                          autoComplete="new-password"
+                          required
+                          disabled={loading}
+                        />
+                      </div>
+                    </div>
+
+                    {error && (
+                      <div className="login-alert login-alert-error">
+                        {error}
+                      </div>
+                    )}
+
+                    {recoveryMessage && (
+                      <div className="login-alert login-alert-success">
+                        {recoveryMessage}
+                      </div>
+                    )}
+
+                    <button
+                      type="submit"
+                      disabled={loading}
+                      className="login-submit login-submit-orange"
+                    >
+                      {loading ? 'Saving Password...' : 'Set Password'}
+                    </button>
+                  </form>
+
+                  <div className="form-footer form-footer-single">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsRecoveryMode(false);
+                        setError('');
+                        setRecoveryMessage('');
+                        setNewPassword('');
+                        setConfirmNewPassword('');
+                      }}
+                      className="back-button"
+                    >
+                      ← Back to Sign In
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </section>
+        </main>
       </div>
     </div>
   );

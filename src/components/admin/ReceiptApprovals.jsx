@@ -10,9 +10,9 @@ const ReceiptApprovals = () => {
   const [error, setError] = useState('');
   const [approvedReceipts, setApprovedReceipts] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const [historySearch, setHistorySearch] = useState('');
-  const [historyStatus, setHistoryStatus] = useState('all');
-  const [selectedHistoryReceipt, setSelectedHistoryReceipt] = useState(null);
+  const [customerSearch, setCustomerSearch] = useState('');
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [customerReceiptFilter, setCustomerReceiptFilter] = useState('all');
 
   useEffect(() => {
     fetchPendingReceipts();
@@ -70,6 +70,9 @@ const ReceiptApprovals = () => {
           id,
           total_amount,
           client_id,
+          is_walk_in,
+          walk_in_name,
+          walk_in_contact,
           client:client_id(full_name, email, contact_number),
           order_items(
             product:product_id(name),
@@ -81,7 +84,7 @@ const ReceiptApprovals = () => {
         employee:generated_by(full_name, email),
         approver:approved_by(full_name, email)
       `)
-      .in('status', ['approved', 'rejected', 'cancelled'])
+      .in('status', ['pending', 'approved', 'completed', 'rejected', 'cancelled'])
       .order('updated_at', { ascending: false });
 
     if (!error) {
@@ -187,6 +190,74 @@ const ReceiptApprovals = () => {
     }
   };
 
+
+  const customerAccounts = (() => {
+    const byId = new Map();
+
+    approvedReceipts.forEach((receipt) => {
+      const order = receipt.order;
+      const clientId = order?.client_id;
+
+      // Keep unlinked walk-in sales separate from registered customer accounts.
+      if (!clientId) return;
+
+      const client = order?.client;
+      if (!client) return;
+
+      if (!byId.has(clientId)) {
+        byId.set(clientId, {
+          id: clientId,
+          full_name: client.full_name || 'Unnamed Client',
+          email: client.email || 'N/A',
+          contact_number: client.contact_number || 'N/A',
+          receipts: [],
+          totalTransactions: 0,
+          totalValue: 0,
+          lastActivity: receipt.updated_at || receipt.generated_at,
+        });
+      }
+
+      const account = byId.get(clientId);
+      account.receipts.push(receipt);
+      account.totalTransactions += 1;
+
+      if (['approved', 'completed'].includes(receipt.status)) {
+        account.totalValue += Number(order?.total_amount || 0);
+      }
+
+      const activityDate = new Date(receipt.updated_at || receipt.generated_at || 0).getTime();
+      const currentLast = new Date(account.lastActivity || 0).getTime();
+
+      if (activityDate > currentLast) {
+        account.lastActivity = receipt.updated_at || receipt.generated_at;
+      }
+    });
+
+    return Array.from(byId.values()).sort((a, b) => {
+      return new Date(b.lastActivity || 0) - new Date(a.lastActivity || 0);
+    });
+  })();
+
+  const filteredCustomerAccounts = customerAccounts.filter((account) => {
+    const query = customerSearch.trim().toLowerCase();
+
+    if (!query) return true;
+
+    return [
+      account.full_name,
+      account.email,
+      account.contact_number,
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+      .includes(query);
+  });
+
+  const unlinkedWalkInReceipts = approvedReceipts.filter(
+    (receipt) => !receipt.order?.client_id && receipt.order?.is_walk_in
+  );
+
   return (
     <div>
       <h2 className="text-2xl font-bold mb-4">🧾 Receipt Approvals</h2>
@@ -269,294 +340,451 @@ const ReceiptApprovals = () => {
         </div>
       )}
 
-      {/* Receipt Transaction History */}
+      {/* Customer Transaction Accounts */}
       <div className="mt-10 overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 bg-[linear-gradient(180deg,#ffffff,#f8fafc)] p-5 md:p-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-600">Transaction Records</p>
-              <h3 className="mt-1 text-2xl font-black text-slate-950">Approved Receipt History</h3>
-              <p className="mt-1 text-sm text-slate-500">Accepted, rejected, and customer-cancelled transactions remain here for reference.</p>
-              <p className="mt-2 text-xs font-medium text-emerald-600">Click any receipt record to view the full receipt.</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-600">
+                Customer Accounts
+              </p>
+              <h3 className="mt-1 text-2xl font-black text-slate-950">
+                Customer Transaction Records
+              </h3>
+              <p className="mt-1 text-sm text-slate-500">
+                Select a customer account to view all of their receipts in one place.
+              </p>
             </div>
+
             <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
-              {approvedReceipts.length} recorded
+              {filteredCustomerAccounts.length} customer{filteredCustomerAccounts.length !== 1 ? 's' : ''}
             </div>
           </div>
 
-          <div className="mt-5">
+          <div className="mt-5 relative">
+            <span className="pointer-events-none absolute inset-y-0 left-4 flex items-center text-slate-400">
+              ⌕
+            </span>
             <input
               type="text"
-              value={historySearch}
-              onChange={(e) => setHistorySearch(e.target.value)}
-              placeholder="Search customer, email, receipt number..."
-              className="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 outline-none transition focus:border-emerald-500 focus:bg-white focus:ring-4 focus:ring-emerald-100"
+              value={customerSearch}
+              onChange={(e) => setCustomerSearch(e.target.value)}
+              placeholder="Search customer name, email, or contact..."
+              className="w-full rounded-2xl border border-slate-300 bg-slate-50 py-3 pl-11 pr-4 outline-none transition focus:border-emerald-500 focus:bg-white focus:ring-4 focus:ring-emerald-100"
             />
-          </div>
-
-          <div className="mt-4 flex flex-wrap gap-2">
-            {[
-              ['all', 'All', approvedReceipts.length],
-              ['approved', 'Accepted', approvedReceipts.filter((r) => r.status === 'approved').length],
-              ['rejected', 'Rejected', approvedReceipts.filter((r) => r.status === 'rejected').length],
-              ['cancelled', 'Cancelled', approvedReceipts.filter((r) => r.status === 'cancelled').length]
-            ].map(([key, label, count]) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setHistoryStatus(key)}
-                className={`rounded-full px-4 py-2 text-xs font-semibold transition ${
-                  historyStatus === key
-                    ? 'bg-slate-900 text-white shadow-sm'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                {label} · {count}
-              </button>
-            ))}
           </div>
         </div>
 
         {historyLoading ? (
-          <div className="p-8 text-center text-slate-500">Loading receipt history...</div>
-        ) : (() => {
-          const normalized = historySearch.trim().toLowerCase();
-          const filteredHistory = approvedReceipts.filter((receipt) => {
-            const client = receipt.order?.client;
-            const employee = receipt.employee;
-            const haystack = [
-              receipt.receipt_number,
-              client?.full_name,
-              client?.email,
-              client?.contact_number,
-              employee?.full_name,
-              employee?.email,
-            ].filter(Boolean).join(' ').toLowerCase();
+          <div className="p-8 text-center text-slate-500">
+            Loading customer transaction records...
+          </div>
+        ) : filteredCustomerAccounts.length === 0 ? (
+          <div className="p-10 text-center">
+            <div className="text-4xl">👥</div>
+            <p className="mt-3 font-semibold text-slate-700">
+              No customer transaction accounts found.
+            </p>
+            <p className="mt-1 text-sm text-slate-500">
+              Customer accounts with receipts will appear here.
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full">
+              <thead className="bg-slate-50">
+                <tr>
+                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Customer
+                  </th>
+                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Contact
+                  </th>
+                  <th className="px-5 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Receipts
+                  </th>
+                  <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Transaction Value
+                  </th>
+                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Last Activity
+                  </th>
+                  <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Action
+                  </th>
+                </tr>
+              </thead>
 
-            const matchesSearch = !normalized || haystack.includes(normalized);
-            const matchesStatus =
-              historyStatus === 'all' || receipt.status === historyStatus;
+              <tbody className="divide-y divide-slate-100">
+                {filteredCustomerAccounts.map((account) => (
+                  <tr
+                    key={account.id}
+                    className="transition-colors hover:bg-slate-50"
+                  >
+                    <td className="px-5 py-4">
+                      <p className="font-semibold text-slate-900">
+                        {account.full_name}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {account.email}
+                      </p>
+                    </td>
 
-            return matchesSearch && matchesStatus;
-          });
+                    <td className="px-5 py-4 text-sm text-slate-600">
+                      {account.contact_number}
+                    </td>
 
-          return filteredHistory.length === 0 ? (
-            <div className="p-8 text-center text-slate-500">No transaction records found for this filter.</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full">
-                <thead className="bg-slate-50">
-                  <tr>
-                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Receipt</th>
-                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Customer</th>
-                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Contact</th>
-                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Order Total</th>
-                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Generated By</th>
-                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Approved</th>
+                    <td className="px-5 py-4 text-center">
+                      <span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
+                        {account.totalTransactions}
+                      </span>
+                    </td>
+
+                    <td className="px-5 py-4 text-right font-bold text-emerald-600">
+                      ₱{account.totalValue.toFixed(2)}
+                    </td>
+
+                    <td className="px-5 py-4 text-sm text-slate-600">
+                      {account.lastActivity
+                        ? new Date(account.lastActivity).toLocaleString()
+                        : 'N/A'}
+                    </td>
+
+                    <td className="px-5 py-4 text-right">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedCustomer(account);
+                          setCustomerReceiptFilter('all');
+                        }}
+                        className="rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-600"
+                      >
+                        👁️ View Receipts
+                      </button>
+                    </td>
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {filteredHistory.map((receipt) => (
-                    <tr
-                      key={receipt.id}
-                      onClick={() => setSelectedHistoryReceipt(receipt)}
-                      className="cursor-pointer hover:bg-slate-50 transition-colors"
-                      title="Click to view the full receipt"
-                    >
-                      <td className="px-5 py-4">
-                        <p className="font-semibold text-slate-900">#{receipt.receipt_number}</p>
-                        <p className="text-xs text-slate-500">Order #{receipt.order_id}</p>
-                      </td>
-                      <td className="px-5 py-4">
-                        <p className="font-semibold text-slate-900">{receipt.order?.client?.full_name || 'N/A'}</p>
-                        <p className="text-xs text-slate-500">{receipt.order?.client?.email || 'N/A'}</p>
-                      </td>
-                      <td className="px-5 py-4 text-sm text-slate-600">{receipt.order?.client?.contact_number || 'N/A'}</td>
-                      <td className="px-5 py-4 font-bold text-emerald-600">₱{receipt.order?.total_amount?.toFixed(2) || '0.00'}</td>
-                      <td className="px-5 py-4 text-sm text-slate-600">{receipt.employee?.full_name || 'N/A'}</td>
-                      <td className="px-5 py-4">
-                        <p className="text-sm font-semibold text-slate-900">
-                          {receipt.approved_at
-                            ? new Date(receipt.approved_at).toLocaleString()
-                            : new Date(receipt.updated_at || receipt.generated_at).toLocaleString()}
-                        </p>
-                        <span className={`mt-1 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
-                          receipt.status === 'approved'
-                            ? 'bg-emerald-100 text-emerald-700'
-                            : receipt.status === 'rejected'
-                              ? 'bg-rose-100 text-rose-700'
-                              : 'bg-amber-100 text-amber-700'
-                        }`}>
-                          {receipt.status === 'approved'
-                            ? 'Accepted'
-                            : receipt.status === 'rejected'
-                              ? 'Rejected'
-                              : 'Cancelled'}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          );
-        })()}
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
-      {/* Receipt Details Modal */}
-      {selectedHistoryReceipt && (() => {
-        const receipt = selectedHistoryReceipt;
-        const client = receipt.order?.client;
-        const employee = receipt.employee;
-        const approver = receipt.approver;
-        const items = receipt.order?.order_items || [];
+      {/* Unlinked Walk-in Sales */}
+      {unlinkedWalkInReceipts.length > 0 && (
+        <div className="mt-6 rounded-[24px] border border-orange-200 bg-orange-50/60 p-5">
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-orange-600">
+                Walk-in Customers
+              </p>
+              <h3 className="mt-1 text-xl font-black text-slate-900">
+                Unlinked Walk-in Sales
+              </h3>
+              <p className="mt-1 text-sm text-slate-600">
+                These sales were made for customers without a registered account.
+              </p>
+            </div>
 
-        return (
-          <div
-            className="fixed inset-0 z-[100] overflow-y-auto bg-slate-950/65 px-4 py-6 backdrop-blur-sm sm:py-10"
-            onClick={() => setSelectedHistoryReceipt(null)}
-          >
-            <div className="flex min-h-full items-center justify-center">
-              <div
-                className="flex w-full max-w-3xl max-h-[calc(100vh-3rem)] sm:max-h-[calc(100vh-5rem)] flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_30px_90px_-25px_rgba(15,23,42,0.55)]"
-                onClick={(e) => e.stopPropagation()}
+            <span className="w-fit rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-orange-700 shadow-sm">
+              {unlinkedWalkInReceipts.length} record{unlinkedWalkInReceipts.length !== 1 ? 's' : ''}
+            </span>
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            {unlinkedWalkInReceipts.map((receipt) => (
+              <button
+                type="button"
+                key={receipt.id}
+                onClick={() => {
+                  setSelectedCustomer({
+                    id: null,
+                    full_name: receipt.order?.walk_in_name || 'Walk-in Customer',
+                    email: 'Walk-in Sale',
+                    contact_number: receipt.order?.walk_in_contact || 'N/A',
+                    receipts: unlinkedWalkInReceipts,
+                    totalTransactions: unlinkedWalkInReceipts.length,
+                    totalValue: unlinkedWalkInReceipts.reduce(
+                      (sum, item) =>
+                        sum + Number(item.order?.total_amount || 0),
+                      0
+                    ),
+                    lastActivity: receipt.updated_at || receipt.generated_at,
+                  });
+                  setCustomerReceiptFilter('all');
+                }}
+                className="rounded-2xl border border-orange-200 bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-orange-300 hover:shadow-md"
               >
-                {/* Modal Header */}
-                <div className="shrink-0 bg-[linear-gradient(135deg,#0f172a_0%,#16233f_58%,#0b3b4b_100%)] px-5 py-5 text-white sm:px-7">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-300">
-                        <span className="rounded-full bg-white/10 px-2.5 py-1">Transaction Receipt</span>
-                        <span className="text-slate-400">Order #{receipt.order_id}</span>
-                      </div>
-                      <h3 className="break-all text-2xl font-black tracking-tight sm:text-3xl">#{receipt.receipt_number}</h3>
-                      <p className="mt-1 text-sm text-slate-300">Approved transaction record</p>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => setSelectedHistoryReceipt(null)}
-                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/10 text-xl font-medium text-white transition hover:bg-white/20 focus:outline-none focus:ring-2 focus:ring-emerald-300"
-                      aria-label="Close receipt details"
-                    >
-                      ×
-                    </button>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold text-slate-900">
+                      {receipt.order?.walk_in_name || 'Walk-in Customer'}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {receipt.order?.walk_in_contact || 'No contact'}
+                    </p>
                   </div>
+
+                  <span className="rounded-full bg-orange-100 px-3 py-1 text-xs font-semibold text-orange-700">
+                    View
+                  </span>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Customer Receipt Profile Modal */}
+      {selectedCustomer && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/65 p-4 backdrop-blur-sm"
+          onClick={() => setSelectedCustomer(null)}
+        >
+          <div
+            className="flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-[30px] border border-slate-200 bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="shrink-0 border-b border-slate-200 bg-[linear-gradient(135deg,#0f172a,#172554_58%,#0f766e)] px-6 py-5 text-white md:px-8">
+              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-300">
+                    Customer Account
+                  </p>
+                  <h3 className="mt-1 text-2xl font-black">
+                    {selectedCustomer.full_name}
+                  </h3>
+                  <p className="mt-1 text-sm text-slate-300">
+                    {selectedCustomer.email} · {selectedCustomer.contact_number}
+                  </p>
                 </div>
 
-                {/* Scrollable Receipt Body */}
-                <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/60 px-4 py-5 sm:px-7 sm:py-6">
-                  <div className="space-y-5">
-                    {/* Customer + Transaction */}
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-lg">👤</div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedCustomer(null)}
+                  className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-xl text-white transition hover:bg-white/20"
+                  aria-label="Close customer receipts"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/70 p-5 md:p-7">
+              <div className="mb-5 grid gap-3 sm:grid-cols-3">
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <p className="text-xs uppercase tracking-[0.16em] text-slate-400">Receipts</p>
+                  <p className="mt-1 text-2xl font-black text-slate-900">
+                    {selectedCustomer.receipts.length}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <p className="text-xs uppercase tracking-[0.16em] text-slate-400">Transaction Value</p>
+                  <p className="mt-1 text-2xl font-black text-emerald-600">
+                    ₱{selectedCustomer.totalValue.toFixed(2)}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <p className="text-xs uppercase tracking-[0.16em] text-slate-400">Account Type</p>
+                  <p className="mt-1 text-lg font-black text-slate-900">
+                    {selectedCustomer.id ? 'Registered Client' : 'Walk-in Customer'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="mb-5 flex flex-wrap gap-2">
+                {[
+                  ['all', 'All'],
+                  ['pending', 'Pending'],
+                  ['approved', 'Accepted'],
+                  ['completed', 'Completed'],
+                  ['rejected', 'Rejected'],
+                  ['cancelled', 'Cancelled'],
+                ].map(([key, label]) => {
+                  const count = selectedCustomer.receipts.filter(
+                    (receipt) =>
+                      key === 'all' || receipt.status === key
+                  ).length;
+
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setCustomerReceiptFilter(key)}
+                      className={`rounded-full px-3.5 py-2 text-xs font-semibold transition ${
+                        customerReceiptFilter === key
+                          ? 'bg-slate-950 text-white'
+                          : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      {label} · {count}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="space-y-4">
+                {selectedCustomer.receipts
+                  .filter(
+                    (receipt) =>
+                      customerReceiptFilter === 'all' ||
+                      receipt.status === customerReceiptFilter
+                  )
+                  .map((receipt) => {
+                    const order = receipt.order;
+                    const items = order?.order_items || [];
+                    const statusStyles = {
+                      pending: 'bg-amber-100 text-amber-700',
+                      approved: 'bg-emerald-100 text-emerald-700',
+                      completed: 'bg-sky-100 text-sky-700',
+                      rejected: 'bg-rose-100 text-rose-700',
+                      cancelled: 'bg-orange-100 text-orange-700',
+                    };
+
+                    return (
+                      <article
+                        key={receipt.id}
+                        className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+                      >
+                        <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
                           <div>
-                            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Customer</p>
-                            <p className="mt-0.5 font-bold text-slate-950">{client?.full_name || 'N/A'}</p>
+                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                              {order?.is_walk_in
+                                ? 'Walk-in Sale'
+                                : 'Registered Sale'}
+                            </p>
+                            <h4 className="mt-1 text-lg font-black text-slate-900">
+                              #{receipt.receipt_number}
+                            </h4>
+                            <p className="text-xs text-slate-500">
+                              Order #{receipt.order_id} ·{' '}
+                              {order?.created_at
+                                ? new Date(order.created_at).toLocaleString()
+                                : receipt.generated_at
+                                  ? new Date(receipt.generated_at).toLocaleString()
+                                  : 'N/A'}
+                            </p>
+                          </div>
+
+                          <div className="text-left sm:text-right">
+                            <span
+                              className={`inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ${
+                                statusStyles[receipt.status] ||
+                                'bg-slate-100 text-slate-600'
+                              }`}
+                            >
+                              {receipt.status === 'approved'
+                                ? 'Accepted'
+                                : receipt.status === 'completed'
+                                  ? 'Completed'
+                                  : receipt.status === 'pending'
+                                    ? 'Pending'
+                                    : receipt.status === 'rejected'
+                                      ? 'Rejected'
+                                      : 'Cancelled'}
+                            </span>
+                            <p className="mt-1.5 text-lg font-black text-emerald-600">
+                              ₱{Number(order?.total_amount || 0).toFixed(2)}
+                            </p>
                           </div>
                         </div>
-                        <div className="mt-4 space-y-2 text-sm text-slate-600">
-                          <p><span className="mr-2">📧</span>{client?.email || 'N/A'}</p>
-                          <p><span className="mr-2">📞</span>{client?.contact_number || 'N/A'}</p>
-                        </div>
-                      </section>
 
-                      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 text-lg">🧾</div>
-                          <div>
-                            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Transaction</p>
-                            <p className="mt-0.5 font-bold text-slate-950">Completed &amp; approved</p>
-                          </div>
-                        </div>
-                        <div className="mt-4 space-y-2 text-sm text-slate-600">
-                          <p>Generated by: <span className="font-semibold text-slate-900">{employee?.full_name || 'N/A'}</span></p>
-                          <p>Generated: {receipt.generated_at ? new Date(receipt.generated_at).toLocaleString() : 'N/A'}</p>
-                          <p>Approved by: <span className="font-semibold text-slate-900">{approver?.full_name || 'Not recorded'}</span></p>
-                          <p>Approved: {receipt.approved_at ? new Date(receipt.approved_at).toLocaleString() : 'N/A'}</p>
-                        </div>
-                      </section>
-                    </div>
+                        <div className="divide-y divide-slate-100">
+                          {items.map((item, index) => (
+                            <div
+                              key={`${receipt.id}-${index}`}
+                              className="flex items-center gap-3 px-5 py-3.5"
+                            >
+                              <div className="h-12 w-12 shrink-0 overflow-hidden rounded-xl border border-slate-200 bg-slate-100">
+                                {item.product?.image_url ? (
+                                  <img
+                                    src={item.product.image_url}
+                                    alt={item.product?.name || 'Product'}
+                                    className="h-full w-full object-cover"
+                                  />
+                                ) : (
+                                  <div className="flex h-full w-full items-center justify-center text-sm">
+                                    📦
+                                  </div>
+                                )}
+                              </div>
 
-                    {/* Items */}
-                    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                      <div className="flex items-center justify-between border-b border-slate-100 bg-white px-5 py-4">
-                        <div>
-                          <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Order Breakdown</p>
-                          <h4 className="mt-1 text-lg font-bold text-slate-950">Items Purchased</h4>
-                        </div>
-                        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
-                          {items.length} item{items.length !== 1 ? 's' : ''}
-                        </span>
-                      </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-sm font-semibold text-slate-900">
+                                  {item.product?.name || 'Unknown Product'}
+                                </p>
+                                <p className="text-xs text-slate-500">
+                                  Qty {item.quantity} × ₱
+                                  {Number(item.price_per_unit || 0).toFixed(2)}
+                                </p>
+                              </div>
 
-                      <div className="overflow-x-auto">
-                        <table className="min-w-full">
-                          <thead className="bg-slate-50">
-                            <tr>
-                              <th className="px-5 py-3 text-left text-[11px] font-bold uppercase tracking-wide text-slate-500">Product</th>
-                              <th className="px-5 py-3 text-center text-[11px] font-bold uppercase tracking-wide text-slate-500">Qty</th>
-                              <th className="px-5 py-3 text-right text-[11px] font-bold uppercase tracking-wide text-slate-500">Unit Price</th>
-                              <th className="px-5 py-3 text-right text-[11px] font-bold uppercase tracking-wide text-slate-500">Subtotal</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100">
-                            {items.map((item, index) => (
-                              <tr key={`${item.product_id || index}-${index}`} className="hover:bg-slate-50/80">
-                                <td className="px-5 py-4">
-                                  <p className="font-semibold text-slate-900">{item.product?.name || 'Unknown Product'}</p>
-                                </td>
-                                <td className="px-5 py-4 text-center text-slate-600">{item.quantity}</td>
-                                <td className="px-5 py-4 text-right text-slate-600">₱{Number(item.price_per_unit || 0).toFixed(2)}</td>
-                                <td className="px-5 py-4 text-right font-semibold text-slate-900">₱{Number(item.subtotal || 0).toFixed(2)}</td>
-                              </tr>
-                            ))}
-                            {items.length === 0 && (
-                              <tr>
-                                <td colSpan="4" className="px-5 py-8 text-center text-sm text-slate-500">No items recorded.</td>
-                              </tr>
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                    </section>
+                              <p className="text-sm font-bold text-slate-900">
+                                ₱{Number(item.subtotal || 0).toFixed(2)}
+                              </p>
+                            </div>
+                          ))}
 
-                    {/* Total */}
-                    <section className="rounded-2xl bg-slate-950 p-5 text-white shadow-lg sm:p-6">
-                      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                          <p className="text-sm text-slate-400">Order Total</p>
-                          <p className="mt-1 text-3xl font-black tracking-tight sm:text-4xl">₱{Number(receipt.order?.total_amount || 0).toFixed(2)}</p>
+                          {items.length === 0 && (
+                            <div className="px-5 py-6 text-center text-sm text-slate-500">
+                              No item breakdown recorded.
+                            </div>
+                          )}
                         </div>
-                        <span className="inline-flex w-fit items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-4 py-2 text-sm font-semibold text-emerald-300">
-                          <span className="h-2 w-2 rounded-full bg-emerald-400" />
-                          Approved
-                        </span>
-                      </div>
-                    </section>
+
+                        <div className="flex flex-col gap-2 border-t border-slate-100 bg-slate-50 px-5 py-4 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+                          <span>
+                            Generated by:{' '}
+                            <strong className="text-slate-700">
+                              {receipt.employee?.full_name || 'N/A'}
+                            </strong>
+                          </span>
+
+                          <span>
+                            {receipt.approved_at
+                              ? `Approved ${new Date(receipt.approved_at).toLocaleString()}`
+                              : receipt.status === 'pending'
+                                ? 'Waiting for admin approval'
+                                : receipt.status === 'completed'
+                                  ? 'Completed directly by employee'
+                                  : receipt.status === 'rejected'
+                                    ? 'Rejected by admin'
+                                    : 'Cancelled'}
+                          </span>
+                        </div>
+                      </article>
+                    );
+                  })}
+
+                {selectedCustomer.receipts.filter(
+                  (receipt) =>
+                    customerReceiptFilter === 'all' ||
+                    receipt.status === customerReceiptFilter
+                ).length === 0 && (
+                  <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500">
+                    No receipts found for this filter.
                   </div>
-                </div>
+                )}
+              </div>
+            </div>
 
-                {/* Sticky Footer */}
-                <div className="shrink-0 border-t border-slate-200 bg-white px-4 py-4 sm:px-7">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="hidden text-xs text-slate-400 sm:block">Click outside the receipt to close</p>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedHistoryReceipt(null)}
-                      className="ml-auto rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300"
-                    >
-                      Close Receipt
-                    </button>
-                  </div>
-                </div>
+            <div className="shrink-0 border-t border-slate-200 bg-white px-6 py-4 md:px-8">
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setSelectedCustomer(null)}
+                  className="rounded-2xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
+                >
+                  Close
+                </button>
               </div>
             </div>
           </div>
-        );
-      })()}
+        </div>
+      )}
+
 
     </div>
   );
