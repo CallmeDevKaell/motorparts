@@ -573,7 +573,13 @@ const Homepage = () => {
           </div>
 
           <div className="mt-8 border-t border-white/10 pt-5 text-xs text-slate-500">
-            © {new Date().getFullYear()} Motor Parts Marketplace. All rights reserved.
+            <p className="text-sm text-slate-500">
+  © 2026 Motor Parts Marketplace. All rights reserved.
+  <span className="mx-2">|</span>
+  <span className="font-medium text-slate-300">
+    Developer: Michael Angelo Dielen
+  </span>
+</p>
           </div>
         </div>
       </footer>
