@@ -141,6 +141,14 @@ const MyReceipts = ({ clientId }) => {
     [orders]
   );
 
+  // Total spending includes only completed orders with a completed receipt
+  // that has been sent to this client. Pending, approved-unpaid, and cancelled
+  // orders are intentionally excluded. Each order is counted once.
+  const totalSpent = useMemo(
+    () => paidOrders.reduce((sum, order) => sum + Number(order.total_amount || 0), 0),
+    [paidOrders]
+  );
+
   const handleCancelOrder = async (orderId) => {
     const confirmed = window.confirm(
       'Cancel this pending online order? The reserved stock will be returned.'
@@ -544,7 +552,7 @@ const MyReceipts = ({ clientId }) => {
         <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-600">
           Purchase History
         </p>
-        <div className="mt-1 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className="mt-1 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <h2 className="text-3xl font-black tracking-tight text-slate-950">
               My Receipts
@@ -554,8 +562,30 @@ const MyReceipts = ({ clientId }) => {
             </p>
           </div>
 
-          <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
-            {orders.length} transaction{orders.length !== 1 ? 's' : ''}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:min-w-[430px]">
+            <div className="rounded-2xl border border-emerald-100 bg-[linear-gradient(135deg,#ecfdf5,#ffffff)] px-5 py-4 shadow-sm">
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">
+                Total Spent
+              </p>
+              <p className="mt-2 text-2xl font-black tracking-tight text-emerald-950">
+                {money(totalSpent)}
+              </p>
+              <p className="mt-1 text-xs text-emerald-800/80">
+                Completed and paid purchases
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 shadow-sm">
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
+                Transactions
+              </p>
+              <p className="mt-2 text-2xl font-black tracking-tight text-slate-950">
+                {orders.length}
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                All orders in your history
+              </p>
+            </div>
           </div>
         </div>
       </div>

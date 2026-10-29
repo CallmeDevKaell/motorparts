@@ -276,7 +276,7 @@ const Login = () => {
                 </h1>
 
                 <p className="showcase-description">
-                  Sign in securely and continue managing motorcycle parts,
+                  Log in securely and continue managing motorcycle parts,
                   customers, orders, inventory, and receipts from one place.
                 </p>
               </div>
@@ -300,7 +300,7 @@ const Login = () => {
                   <p className="flow-label">Account flow</p>
                   <p className="flow-text">
                     Register → Admin Approval → Approval Email → Set Password
-                    → Sign In
+                    → Log in
                   </p>
                 </div>
               </div>
@@ -313,7 +313,6 @@ const Login = () => {
                 <>
                   <div className="form-heading">
                     <p className="form-kicker">Welcome back</p>
-                    <h2>Sign in</h2>
                     <p>
                       Enter your username or email and password to access your
                       account.
@@ -344,7 +343,7 @@ const Login = () => {
                     <div className="field-group">
                       <div className="field-label-row">
                         <label htmlFor="password">Password</label>
-                        <span>Secure sign-in</span>
+                        <span>Secure Log-in</span>
                       </div>
 
                       <div className="input-shell">
@@ -375,17 +374,13 @@ const Login = () => {
                       disabled={loading}
                       className="login-submit"
                     >
-                      {loading ? 'Signing in...' : 'Sign In'}
+                      {loading ? 'Logging in...' : 'Log In'}
                     </button>
                   </form>
 
                   <div className="form-footer">
                     <Link to="/">← Back to Home</Link>
 
-                    <p>
-                      Don&apos;t have an account?{' '}
-                      <Link to="/register">Register here</Link>
-                    </p>
                   </div>
                 </>
               ) : (
@@ -484,7 +479,7 @@ const Login = () => {
                       }}
                       className="back-button"
                     >
-                      ← Back to Sign In
+                      ← Back to Log In
                     </button>
                   </div>
                 </>

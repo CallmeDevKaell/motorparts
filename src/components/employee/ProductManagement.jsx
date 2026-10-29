@@ -3,6 +3,42 @@ import { createPortal } from 'react-dom';
 import { supabase } from '../../services/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 
+const money = (value) => `₱${Number(value || 0).toLocaleString('en-PH', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+})}`;
+
+// The percentage is a markup on purchase cost: cost + (cost * percentage).
+const calculateSellingPrice = (purchasePrice, profitPercentage) => {
+  if (purchasePrice === '' || profitPercentage === '') return null;
+  const cost = Number(purchasePrice);
+  const percentage = Number(profitPercentage);
+  if (!Number.isFinite(cost) || !Number.isFinite(percentage) || cost < 0 || percentage < 0) return null;
+  return Math.round((cost * (1 + percentage / 100) + Number.EPSILON) * 100) / 100;
+};
+
+const getStoredMarkup = (product) => {
+  if (product.profit_percentage != null) return Number(product.profit_percentage).toFixed(2);
+  const cost = Number(product.purchase_price);
+  const selling = Number(product.price);
+  if (product.purchase_price != null && cost > 0 && selling >= cost) {
+    return (((selling - cost) / cost) * 100).toFixed(2);
+  }
+  return '';
+};
+
+const emptyForm = {
+  name: '',
+  description: '',
+  category: '',
+  purchase_price: '',
+  profit_percentage: '',
+  stock_quantity: '',
+  is_best_offer: false,
+  is_new_arrival: false,
+  image_url: '',
+};
+
 const ProductManagement = () => {
   const { user } = useAuth();
   const [products, setProducts] = useState([]);
@@ -11,31 +47,10 @@ const ProductManagement = () => {
   const [editingProduct, setEditingProduct] = useState(null);
   const [imageFile, setImageFile] = useState(null);
   const [uploading, setUploading] = useState(false);
-  const [formData, setFormData] = useState({
-    name: '',
-    description: '',
-    category: '',
-    price: '',
-    stock_quantity: '',
-    is_best_offer: false,
-    is_new_arrival: false,
-    image_url: ''
-  });
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('all');
+  const [formError, setFormError] = useState('');
+  const [formData, setFormData] = useState(emptyForm);
 
-  const categories = [
-    'Rear Shock',
-    'Radiator',
-    'Radiator Cover',
-    'Mags',
-    'Tires',
-    'Disc Brake',
-    'Caliper',
-    'Brake System',
-    'Swing Arm',
-    'Pipe'
-  ];
+  const categories = ['Engine', 'Brake', 'Electrical', 'Chain', 'Tire', 'Clutch', 'Body', 'Other'];
 
   useEffect(() => {
     fetchProducts();
@@ -47,90 +62,12 @@ const ProductManagement = () => {
       .from('products')
       .select('*')
       .order('created_at', { ascending: false });
-    
-    if (!error) setProducts(data || []);
-    setLoading(false);
-  };
-
-  // Upload image to Supabase Storage
-  const uploadImage = async (file, productId) => {
-    if (!file) return null;
-    
-    setUploading(true);
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${productId}-${Date.now()}.${fileExt}`;
-    const filePath = `products/${fileName}`;
-
-    const { data, error } = await supabase.storage
-      .from('product-images')
-      .upload(filePath, file, {
-        cacheControl: '3600',
-        upsert: false
-      });
 
     if (error) {
-      console.error('Upload error:', error);
-      setUploading(false);
-      return null;
-    }
-
-    // Get public URL
-    const { data: urlData } = supabase.storage
-      .from('product-images')
-      .getPublicUrl(filePath);
-
-    setUploading(false);
-    return urlData.publicUrl;
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-
-    let imageUrl = formData.image_url;
-
-    // Upload image if there's a new file
-    if (imageFile) {
-      const tempId = editingProduct?.id || Date.now().toString();
-      const uploadedUrl = await uploadImage(imageFile, tempId);
-      if (uploadedUrl) {
-        imageUrl = uploadedUrl;
-      }
-    }
-
-    const productData = {
-      name: formData.name,
-      description: formData.description,
-      category: formData.category,
-      price: parseFloat(formData.price),
-      stock_quantity: parseInt(formData.stock_quantity),
-      is_best_offer: formData.is_best_offer,
-      is_new_arrival: formData.is_new_arrival,
-      image_url: imageUrl || null,
-      created_by: user.id
-    };
-
-    let error;
-    if (editingProduct) {
-      const { error: updateError } = await supabase
-        .from('products')
-        .update(productData)
-        .eq('id', editingProduct.id);
-      error = updateError;
+      console.error('Error fetching products:', error);
+      setFormError(`Unable to load products: ${error.message}`);
     } else {
-      const { error: insertError } = await supabase
-        .from('products')
-        .insert([productData]);
-      error = insertError;
-    }
-
-    if (error) {
-      alert('Error: ' + error.message);
-    } else {
-      alert(editingProduct ? 'Product updated!' : 'Product added!');
-      setShowModal(false);
-      resetForm();
-      fetchProducts();
+      setProducts(data || []);
     }
     setLoading(false);
   };
@@ -138,44 +75,141 @@ const ProductManagement = () => {
   const resetForm = () => {
     setEditingProduct(null);
     setImageFile(null);
-    setFormData({
-      name: '',
-      description: '',
-      category: '',
-      price: '',
-      stock_quantity: '',
-      is_best_offer: false,
-      is_new_arrival: false,
-      image_url: ''
-    });
+    setFormError('');
+    setFormData({ ...emptyForm });
+  };
+
+  const uploadImage = async (file, productId) => {
+    if (!file) return null;
+
+    setUploading(true);
+    try {
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${productId}-${Date.now()}.${fileExt}`;
+      const filePath = `products/${fileName}`;
+      const { error } = await supabase.storage
+        .from('product-images')
+        .upload(filePath, file, { cacheControl: '3600', upsert: false });
+
+      if (error) throw error;
+      const { data: urlData } = supabase.storage.from('product-images').getPublicUrl(filePath);
+      return urlData.publicUrl;
+    } catch (error) {
+      console.error('Upload error:', error);
+      throw new Error(`Image upload failed: ${error.message}`);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setFormError('');
+
+    const isLegacyProductEdit = Boolean(
+      editingProduct && formData.purchase_price === '' && formData.profit_percentage === ''
+    );
+    const purchasePrice = formData.purchase_price === '' ? null : Number(formData.purchase_price);
+    const profitPercentage = formData.profit_percentage === '' ? null : Number(formData.profit_percentage);
+    const sellingPrice = isLegacyProductEdit
+      ? Number(editingProduct.price)
+      : calculateSellingPrice(formData.purchase_price, formData.profit_percentage);
+    const stockQuantity = Number(formData.stock_quantity);
+
+    if (!isLegacyProductEdit && (formData.purchase_price === '' || !Number.isFinite(purchasePrice) || purchasePrice < 0)) {
+      setFormError('Please enter a valid purchase price (₱).');
+      return;
+    }
+    if (!isLegacyProductEdit && (formData.profit_percentage === '' || !Number.isFinite(profitPercentage) || profitPercentage < 0)) {
+      setFormError('Please enter a valid markup percentage (0 or higher).');
+      return;
+    }
+    if (sellingPrice === null || !Number.isFinite(sellingPrice) || sellingPrice < 0) {
+      setFormError('Enter a purchase price and markup percentage to calculate the selling price.');
+      return;
+    }
+    if (formData.stock_quantity === '' || !Number.isInteger(stockQuantity) || stockQuantity < 0) {
+      setFormError('Please enter a valid whole-number stock quantity.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      let imageUrl = formData.image_url;
+      if (imageFile) {
+        const tempId = editingProduct?.id || Date.now().toString();
+        imageUrl = await uploadImage(imageFile, tempId);
+      }
+
+      const productData = {
+        name: formData.name.trim(),
+        description: formData.description.trim() || null,
+        category: formData.category || null,
+        purchase_price: isLegacyProductEdit ? null : purchasePrice,
+        profit_percentage: isLegacyProductEdit ? null : profitPercentage,
+        // Keep `price` as the calculated selling price so storefront/cart/order queries remain compatible.
+        price: sellingPrice,
+        stock_quantity: stockQuantity,
+        is_best_offer: formData.is_best_offer,
+        is_new_arrival: formData.is_new_arrival,
+        image_url: imageUrl || null,
+        ...(user?.id ? { created_by: user.id } : {}),
+      };
+
+      let error;
+      if (editingProduct) {
+        const { error: updateError } = await supabase
+          .from('products')
+          .update(productData)
+          .eq('id', editingProduct.id);
+        error = updateError;
+      } else {
+        const { error: insertError } = await supabase
+          .from('products')
+          .insert([productData]);
+        error = insertError;
+      }
+
+      if (error) throw error;
+
+      window.alert(editingProduct ? 'Product updated!' : 'Product added!');
+      setShowModal(false);
+      resetForm();
+      await fetchProducts();
+    } catch (error) {
+      console.error('Save product error:', error);
+      setFormError(error?.message || 'Unable to save product. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleDelete = async (id) => {
-    if (window.confirm('Delete this product?')) {
-      const { error } = await supabase
-        .from('products')
-        .delete()
-        .eq('id', id);
-      
-      if (!error) {
-        alert('Product deleted!');
-        fetchProducts();
-      }
+    if (!window.confirm('Delete this product?')) return;
+    const { error } = await supabase.from('products').delete().eq('id', id);
+    if (error) {
+      window.alert(`Unable to delete product: ${error.message}`);
+      return;
     }
+    window.alert('Product deleted!');
+    await fetchProducts();
   };
 
   const handleEdit = (product) => {
     setEditingProduct(product);
     setImageFile(null);
+    setFormError('');
     setFormData({
-      name: product.name,
+      name: product.name || '',
       description: product.description || '',
       category: product.category || '',
-      price: product.price.toString(),
-      stock_quantity: product.stock_quantity.toString(),
-      is_best_offer: product.is_best_offer || false,
-      is_new_arrival: product.is_new_arrival || false,
-      image_url: product.image_url || ''
+      // Older products remain blank here because their historical purchase cost is unknown.
+      purchase_price: product.purchase_price == null ? '' : String(product.purchase_price),
+      profit_percentage: getStoredMarkup(product),
+      stock_quantity: product.stock_quantity == null ? '' : String(product.stock_quantity),
+      is_best_offer: Boolean(product.is_best_offer),
+      is_new_arrival: Boolean(product.is_new_arrival),
+      image_url: product.image_url || '',
     });
     setShowModal(true);
   };
@@ -185,96 +219,30 @@ const ProductManagement = () => {
       .from('products')
       .update({ is_best_offer: !currentStatus })
       .eq('id', id);
-    
-    if (!error) fetchProducts();
+    if (error) {
+      window.alert(`Unable to update offer: ${error.message}`);
+      return;
+    }
+    await fetchProducts();
   };
-
-  const filteredProducts = products.filter((product) => {
-    const normalizedSearch = searchTerm.trim().toLowerCase();
-
-    const matchesSearch =
-      !normalizedSearch ||
-      product.name?.toLowerCase().includes(normalizedSearch) ||
-      product.description?.toLowerCase().includes(normalizedSearch);
-
-    const matchesCategory =
-      selectedCategory === 'all' ||
-      product.category === selectedCategory;
-
-    return matchesSearch && matchesCategory;
-  });
 
   return (
     <div>
-      <div className="flex justify-between items-center mb-4">
+      <div className="mb-4 flex items-center justify-between gap-4">
         <h2 className="text-2xl font-bold">Product Management</h2>
         <button
-          onClick={() => {
-            resetForm();
-            setShowModal(true);
-          }}
-          className="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition"
+          type="button"
+          onClick={() => { resetForm(); setShowModal(true); }}
+          className="rounded-lg bg-blue-500 px-4 py-2 text-white transition hover:bg-blue-600"
         >
           + Add Product
         </button>
       </div>
 
-      {/* Product Search + Category Filter */}
-      <div className="mb-5 rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-col gap-3 md:flex-row">
-          <div className="relative flex-1">
-            <span className="pointer-events-none absolute inset-y-0 left-4 flex items-center text-slate-400">
-              ⌕
-            </span>
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search product name or description..."
-              className="w-full rounded-2xl border border-slate-300 bg-slate-50 py-3 pl-11 pr-4 text-sm outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
-            />
-          </div>
+      {formError && !showModal && (
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{formError}</div>
+      )}
 
-          <select
-            value={selectedCategory}
-            onChange={(e) => setSelectedCategory(e.target.value)}
-            className="rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100 md:w-64"
-          >
-            <option value="all">All Categories</option>
-            {categories.map((category) => (
-              <option key={category} value={category}>
-                {category}
-              </option>
-            ))}
-          </select>
-
-          {(searchTerm || selectedCategory !== 'all') && (
-            <button
-              type="button"
-              onClick={() => {
-                setSearchTerm('');
-                setSelectedCategory('all');
-              }}
-              className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-200"
-            >
-              Clear
-            </button>
-          )}
-        </div>
-
-        <div className="mt-3 flex items-center justify-between gap-3 text-xs text-slate-500">
-          <span>
-            Showing {filteredProducts.length} of {products.length} product{products.length !== 1 ? 's' : ''}
-          </span>
-          {selectedCategory !== 'all' && (
-            <span className="rounded-full bg-blue-50 px-3 py-1 font-semibold text-blue-700">
-              {selectedCategory}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Product Table */}
       <div className="overflow-x-auto">
         <table className="w-full">
           <thead className="bg-gray-50">
@@ -282,204 +250,127 @@ const ProductManagement = () => {
               <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Image</th>
               <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Name</th>
               <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Category</th>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Price</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Purchase Price</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Markup %</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Selling Price</th>
               <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Stock</th>
               <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Best Offer</th>
               <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y">
-            {filteredProducts.map((product) => (
+            {products.map((product) => (
               <tr key={product.id} className="hover:bg-gray-50">
                 <td className="px-4 py-3">
                   {product.image_url ? (
-                    <img src={product.image_url} alt={product.name} className="w-12 h-12 object-cover rounded" />
+                    <img src={product.image_url} alt={product.name} className="h-12 w-12 rounded object-cover" />
                   ) : (
-                    <div className="w-12 h-12 bg-gray-200 rounded flex items-center justify-center text-xs text-gray-400">
-                      No img
-                    </div>
+                    <div className="flex h-12 w-12 items-center justify-center rounded bg-gray-200 text-xs text-gray-400">No img</div>
                   )}
                 </td>
                 <td className="px-4 py-3">{product.name}</td>
                 <td className="px-4 py-3">{product.category || 'N/A'}</td>
-                <td className="px-4 py-3 font-medium">₱{product.price.toFixed(2)}</td>
+                <td className="px-4 py-3 font-medium text-gray-600">
+                  {product.purchase_price == null ? <span className="text-amber-600">Not set</span> : money(product.purchase_price)}
+                </td>
+                <td className="px-4 py-3 text-gray-600">
+                  {product.profit_percentage != null
+                    ? `${Number(product.profit_percentage).toFixed(2)}%`
+                    : product.purchase_price != null && Number(product.purchase_price) > 0 && Number(product.price) >= Number(product.purchase_price)
+                      ? `${(((Number(product.price) - Number(product.purchase_price)) / Number(product.purchase_price)) * 100).toFixed(2)}%`
+                      : <span className="text-amber-600">Not set</span>}
+                </td>
+                <td className="px-4 py-3 font-semibold">{money(product.price)}</td>
                 <td className="px-4 py-3">
-                  <span className={product.stock_quantity > 0 ? 'text-green-600' : 'text-red-600'}>
-                    {product.stock_quantity}
-                  </span>
+                  <span className={Number(product.stock_quantity) > 0 ? 'text-green-600' : 'text-red-600'}>{product.stock_quantity}</span>
                 </td>
                 <td className="px-4 py-3">
                   <button
+                    type="button"
                     onClick={() => toggleBestOffer(product.id, product.is_best_offer)}
-                    className={`px-3 py-1 rounded text-sm ${
-                      product.is_best_offer 
-                        ? 'bg-green-500 text-white' 
-                        : 'bg-gray-300 text-gray-700 hover:bg-gray-400'
-                    }`}
+                    className={`rounded px-3 py-1 text-sm ${product.is_best_offer ? 'bg-green-500 text-white' : 'bg-gray-300 text-gray-700 hover:bg-gray-400'}`}
                   >
                     {product.is_best_offer ? '✓ Active' : 'Set Offer'}
                   </button>
                 </td>
-                <td className="px-4 py-3 space-x-2">
-                  <button
-                    onClick={() => handleEdit(product)}
-                    className="text-blue-600 hover:text-blue-800"
-                  >
-                    ✏️ Edit
-                  </button>
-                  <button
-                    onClick={() => handleDelete(product.id)}
-                    className="text-red-600 hover:text-red-800"
-                  >
-                    🗑️ Delete
-                  </button>
+                <td className="space-x-2 whitespace-nowrap px-4 py-3">
+                  <button type="button" onClick={() => handleEdit(product)} className="text-blue-600 hover:text-blue-800">✏️ Edit</button>
+                  <button type="button" onClick={() => handleDelete(product.id)} className="text-red-600 hover:text-red-800">🗑️ Delete</button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-        {filteredProducts.length === 0 && (
-          <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center text-slate-500">
-            <div className="text-3xl">🔍</div>
-            <p className="mt-2 font-semibold text-slate-700">
-              No products found.
-            </p>
-            <p className="mt-1 text-sm">
-              Try another keyword or category.
-            </p>
-          </div>
+        {!loading && products.length === 0 && (
+          <div className="py-8 text-center text-gray-500">No products yet. Click &quot;Add Product&quot; to get started!</div>
         )}
       </div>
 
-      {/* Modal */}
-      {showModal && (
-        createPortal(
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
-            <div className="bg-white rounded-lg p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
-            <h3 className="text-xl font-bold mb-4">
-              {editingProduct ? 'Edit Product' : 'Add New Product'}
-            </h3>
+      {showModal && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-lg bg-white p-6">
+            <h3 className="mb-1 text-xl font-bold">{editingProduct ? 'Edit Product' : 'Add New Product'}</h3>
+            <p className="mb-4 text-sm text-gray-500">Enter the purchase cost and markup percentage. The selling price is calculated automatically.</p>
             <form onSubmit={handleSubmit}>
               <div className="space-y-3">
                 <div>
-                  <label className="block text-sm font-medium mb-1">Product Name *</label>
-                  <input
-                    type="text"
-                    required
-                    value={formData.name}
-                    onChange={(e) => setFormData({...formData, name: e.target.value})}
-                    className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
-                  />
+                  <label className="mb-1 block text-sm font-medium">Product Name *</label>
+                  <input type="text" required maxLength={35} value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className="w-full rounded-lg border px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-1">Description</label>
-                  <textarea
-                    value={formData.description}
-                    onChange={(e) => setFormData({...formData, description: e.target.value})}
-                    className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
-                    rows="3"
-                  />
+                  <label className="mb-1 block text-sm font-medium">Description</label>
+                  <textarea maxLength={500} value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} className="w-full rounded-lg border px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" rows="3" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-1">Category</label>
-                  <select
-                    value={formData.category}
-                    onChange={(e) => setFormData({...formData, category: e.target.value})}
-                    className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
-                  >
+                  <label className="mb-1 block text-sm font-medium">Category</label>
+                  <select value={formData.category} onChange={(e) => setFormData({ ...formData, category: e.target.value })} className="w-full rounded-lg border px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500">
                     <option value="">Select Category</option>
-                    {categories.map((cat) => (
-                      <option key={cat} value={cat}>{cat}</option>
-                    ))}
+                    {categories.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-1">Price (₱) *</label>
-                  <input
-                    type="number"
-                    required
-                    step="0.01"
-                    min="0"
-                    value={formData.price}
-                    onChange={(e) => setFormData({...formData, price: e.target.value})}
-                    className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
-                  />
+                  <label className="mb-1 block text-sm font-medium">Purchase Price (₱) *</label>
+                  <input type="number" required step="0.01" min="0" value={formData.purchase_price} onChange={(e) => setFormData({ ...formData, purchase_price: e.target.value })} placeholder="Enter cost / puhunan" className="w-full rounded-lg border px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" />
+                  <p className="mt-1 text-xs text-gray-500">The amount you pay to buy the product.</p>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-1">Stock Quantity *</label>
-                  <input
-                    type="number"
-                    required
-                    min="0"
-                    value={formData.stock_quantity}
-                    onChange={(e) => setFormData({...formData, stock_quantity: e.target.value})}
-                    className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
-                  />
+                  <label className="mb-1 block text-sm font-medium">Profit / Markup (%) *</label>
+                  <input type="number" required min="0" step="0.01" value={formData.profit_percentage} onChange={(e) => setFormData({ ...formData, profit_percentage: e.target.value })} placeholder="e.g. 20" className="w-full rounded-lg border px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" />
+                  <p className="mt-1 text-xs text-gray-500">Percentage is calculated on the purchase price (cost).</p>
                 </div>
-                
-                {/* Image Upload */}
                 <div>
-                  <label className="block text-sm font-medium mb-1">Product Image</label>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => setImageFile(e.target.files[0])}
-                    className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none"
-                  />
-                  {formData.image_url && !imageFile && (
-                    <div className="mt-2">
-                      <img src={formData.image_url} alt="Product" className="h-20 w-20 object-cover rounded" />
-                      <p className="text-xs text-gray-500 mt-1">Current image</p>
-                    </div>
-                  )}
-                  {imageFile && (
-                    <p className="text-xs text-green-600 mt-1">New image selected: {imageFile.name}</p>
-                  )}
+                  <label className="mb-1 block text-sm font-medium">Calculated Selling Price (₱)</label>
+                  <input type="text" readOnly value={calculateSellingPrice(formData.purchase_price, formData.profit_percentage) == null ? '' : money(calculateSellingPrice(formData.purchase_price, formData.profit_percentage))} placeholder="Enter purchase price and percentage" className="w-full rounded-lg border bg-gray-50 px-3 py-2 text-gray-700 outline-none" />
+                  <p className="mt-1 text-xs text-gray-500">Example: ₱500 purchase price + 20% = ₱600 selling price. This is the price shown to customers.</p>
                 </div>
-
-                <div className="flex space-x-4">
-                  <label className="flex items-center">
-                    <input
-                      type="checkbox"
-                      checked={formData.is_best_offer}
-                      onChange={(e) => setFormData({...formData, is_best_offer: e.target.checked})}
-                      className="mr-2"
-                    />
-                    Best Offer
-                  </label>
-                  <label className="flex items-center">
-                    <input
-                      type="checkbox"
-                      checked={formData.is_new_arrival}
-                      onChange={(e) => setFormData({...formData, is_new_arrival: e.target.checked})}
-                      className="mr-2"
-                    />
-                    New Arrival
-                  </label>
+                <div>
+                  <label className="mb-1 block text-sm font-medium">Stock Quantity *</label>
+                  <input type="number" required min="0" step="1" value={formData.stock_quantity} onChange={(e) => setFormData({ ...formData, stock_quantity: e.target.value })} className="w-full rounded-lg border px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium">Product Image</label>
+                  <input type="file" accept="image/*" onChange={(e) => setImageFile(e.target.files?.[0] || null)} className="w-full rounded-lg border px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500" />
+                  {formData.image_url && !imageFile && <div className="mt-2"><img src={formData.image_url} alt="Current product" className="h-20 w-20 rounded object-cover" /><p className="mt-1 text-xs text-gray-500">Current image</p></div>}
+                  {imageFile && <p className="mt-1 text-xs text-green-600">New image selected: {imageFile.name}</p>}
+                </div>
+                <div className="flex flex-wrap gap-4">
+                  <label className="flex items-center"><input type="checkbox" checked={formData.is_best_offer} onChange={(e) => setFormData({ ...formData, is_best_offer: e.target.checked })} className="mr-2" />Best Offer</label>
+                  <label className="flex items-center"><input type="checkbox" checked={formData.is_new_arrival} onChange={(e) => setFormData({ ...formData, is_new_arrival: e.target.checked })} className="mr-2" />New Arrival</label>
                 </div>
               </div>
-              <div className="flex justify-end space-x-3 mt-6">
-                <button
-                  type="button"
-                  onClick={() => setShowModal(false)}
-                  className="px-4 py-2 border rounded-lg hover:bg-gray-50 transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={loading || uploading}
-                  className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition disabled:opacity-50"
-                >
-                  {uploading ? 'Uploading...' : loading ? 'Saving...' : (editingProduct ? 'Update' : 'Add')}
+
+              {formError && <div role="alert" className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</div>}
+
+              <div className="mt-6 flex justify-end space-x-3">
+                <button type="button" onClick={() => { setShowModal(false); setFormError(''); }} className="rounded-lg border px-4 py-2 transition hover:bg-gray-50">Cancel</button>
+                <button type="submit" disabled={loading || uploading} className="rounded-lg bg-blue-500 px-4 py-2 text-white transition hover:bg-blue-600 disabled:opacity-50">
+                  {uploading ? 'Uploading...' : loading ? 'Saving...' : editingProduct ? 'Update' : 'Add'}
                 </button>
               </div>
             </form>
-            </div>
           </div>
-          ,
-          document.body
-        )
+        </div>,
+        document.body
       )}
     </div>
   );
