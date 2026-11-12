@@ -8,6 +8,7 @@ const UserApprovals = () => {
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState(null);
   const [rejectReason, setRejectReason] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     fetchPendingUsers();
@@ -116,6 +117,29 @@ const UserApprovals = () => {
     fetchPendingUsers();
   };
 
+  const filteredUsers = pendingUsers.filter((user) => {
+    const query = searchTerm.trim().toLowerCase();
+
+    if (!query) return true;
+
+    const searchableText = [
+      user.full_name,
+      user.first_name,
+      user.last_name,
+      user.middle_name,
+      user.username,
+      user.email,
+      user.id_number,
+      user.contact_number,
+      user.address,
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+
+    return searchableText.includes(query);
+  });
+
   return (
     <div>
       <div className="mb-6">
@@ -128,6 +152,45 @@ const UserApprovals = () => {
         </p>
       </div>
 
+      <div className="mb-5 rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm md:p-5">
+        <div className="flex flex-col gap-3 md:flex-row">
+          <div className="relative flex-1">
+            <span className="pointer-events-none absolute inset-y-0 left-4 flex items-center text-slate-400">
+              ⌕
+            </span>
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search name, email, username, ID..."
+              className="w-full rounded-2xl border border-slate-300 bg-slate-50 py-3 pl-11 pr-4 text-sm outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
+            />
+          </div>
+
+          {searchTerm && (
+            <button
+              type="button"
+              onClick={() => setSearchTerm('')}
+              className="rounded-2xl bg-slate-100 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-200"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+
+        <div className="mt-3 flex items-center justify-between gap-3 text-xs text-slate-500">
+          <span>
+            Showing {filteredUsers.length} of {pendingUsers.length} pending account
+            {pendingUsers.length !== 1 ? 's' : ''}
+          </span>
+          {searchTerm && (
+            <span className="rounded-full bg-blue-50 px-3 py-1 font-semibold text-blue-700">
+              Filter active
+            </span>
+          )}
+        </div>
+      </div>
+
       {loading ? (
         <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-slate-500">
           Loading pending accounts...
@@ -135,6 +198,16 @@ const UserApprovals = () => {
       ) : pendingUsers.length === 0 ? (
         <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-10 text-center text-emerald-700">
           ✅ No pending user approvals.
+        </div>
+      ) : filteredUsers.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-slate-500">
+          <div className="text-3xl">🔍</div>
+          <p className="mt-2 font-semibold text-slate-700">
+            No matching pending accounts.
+          </p>
+          <p className="mt-1 text-sm">
+            Try another name, email, username, or ID.
+          </p>
         </div>
       ) : (
         <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
@@ -150,7 +223,7 @@ const UserApprovals = () => {
             </thead>
 
             <tbody className="divide-y divide-slate-100">
-              {pendingUsers.map((user) => (
+              {filteredUsers.map((user) => (
                 <tr key={user.id} className="hover:bg-slate-50">
                   <td className="px-4 py-4 align-top">
                     <div className="font-semibold text-slate-900">

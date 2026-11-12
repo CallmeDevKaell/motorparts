@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../services/supabase';
 import UserApprovals from './UserApprovals';
-import ReceiptApprovals from './ReceiptApprovals';
 import Reports from './Reports';
 import AccountManagement from './AccountManagement';
 import ProductManagement from '../employee/ProductManagement'; // Reuse the same component
@@ -28,13 +27,6 @@ const adminTabs = [
     icon: '✅',
     eyebrow: 'Account Approvals',
     description: 'Review pending registrations and access requests.'
-  },
-  {
-    key: 'receipts',
-    label: 'Receipts',
-    icon: '🧾',
-    eyebrow: 'Finance',
-    description: 'Track receipt submissions and payment records.'
   },
   {
     key: 'reports',
@@ -190,7 +182,6 @@ const AdminDashboard = () => {
             {activeTab === 'accounts' && <AccountManagement />}
             {activeTab === 'products' && <ProductManagement />}
             {activeTab === 'approvals' && <UserApprovals />}
-            {activeTab === 'receipts' && <ReceiptApprovals />}
             {activeTab === 'reports' && <Reports />}
           </div>
           </section>
